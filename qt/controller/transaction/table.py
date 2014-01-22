@@ -54,7 +54,7 @@ class TransactionTableDelegate(TableDelegate):
         elif column.name == 'amount' and self._model.has_multiple_currencies:
             try:
                 amount = self._model.rows[index.row()].transaction.amount
-                if hasattr(amount, 'currency'):
+                if hasattr(amount, 'currency') and amount.currency.code != 'USD':
                     # Lookup the generated pixmap by it's code
                     return [self._currency_pixs.currency_decorations[amount.currency.code]]
                 else:
