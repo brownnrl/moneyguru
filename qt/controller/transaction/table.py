@@ -11,25 +11,47 @@ from PyQt4.QtGui import QPixmap
 
 from qtlib.column import Column
 from ...support.item_delegate import ItemDecoration
+from ...support.item_delegate import CurrencyPixs
 from ..table import TableDelegate, DATE_EDIT, DESCRIPTION_EDIT, PAYEE_EDIT, ACCOUNT_EDIT
 from ..table_with_transactions import TableWithTransactions
 
 class TransactionTableDelegate(TableDelegate):
+
+
     def __init__(self, model):
         TableDelegate.__init__(self, model)
         arrow = QPixmap(':/right_arrow_gray_12')
         arrowSelected = QPixmap(':/right_arrow_white_12')
+        self._currency_pixs = CurrencyPixs()
         self._decoFromArrow = ItemDecoration(arrow, self._model.show_from_account)
         self._decoFromArrowSelected = ItemDecoration(arrowSelected, self._model.show_from_account)
         self._decoToArrow = ItemDecoration(arrow, self._model.show_to_account)
         self._decoToArrowSelected = ItemDecoration(arrowSelected, self._model.show_to_account)
-    
+
+    def paint(self, painter, option, index):
+        column = self._model.columns.column_by_index(index.column())
+
+        if column.name == 'amount':
+            TableDelegate.paint(self, painter, option, index, align_right=False)
+        else:
+            TableDelegate.paint(self, painter, option, index, align_right=True)
+
     def _get_decorations(self, index, isSelected):
         column = self._model.columns.column_by_index(index.column())
+
         if column.name == 'from':
             return [self._decoFromArrowSelected if isSelected else self._decoFromArrow]
         elif column.name == 'to':
             return [self._decoToArrowSelected if isSelected else self._decoToArrow]
+        elif column.name == 'amount' and self._model.has_multiple_currencies:
+            try:
+                amount = self._model.rows[index.row()].transaction.amount
+                if hasattr(amount, 'currency'):
+                    return [self._currency_pixs.currency_decorations[amount.currency.code]]
+                else:
+                    return []
+            except IndexError:
+                return []
         else:
             return []
     
@@ -53,4 +75,12 @@ class TransactionTable(TableWithTransactions):
         self.view.setItemDelegate(self.tableDelegate)
         self.view.sortByColumn(1, Qt.AscendingOrder) # sorted by date by default
         self.view.deletePressed.connect(self.model.delete)
-    
+
+    def _getData(self, row, column, role):
+        if role in (Qt.DisplayRole, Qt.EditRole) and column.name == 'amount':
+            if hasattr(row, 'transaction'):
+                amount = row.transaction.amount
+                if hasattr(amount, 'value'):
+                    return "%.2f" % (amount.value,)
+
+        return TableWithTransactions._getData(self, row, column, role)

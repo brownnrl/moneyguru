@@ -89,7 +89,26 @@ class TransactionTable(TransactionTableBase):
     @property
     def selected_transactions(self):
         return [row.transaction for row in self.selected_rows if hasattr(row, 'transaction')]
-    
+
+    @property
+    def has_multiple_currencies(self):
+
+        this_currency = None
+        last_currency = None
+
+        for row in self.rows:
+            if hasattr(row, 'transaction') and \
+               hasattr(row.transaction, 'amount') and\
+               hasattr(row.transaction.amount, 'currency'):
+                this_currency = row.transaction.amount.currency.code
+
+            if last_currency is not None and this_currency != last_currency:
+                return True
+
+            last_currency = this_currency
+
+        return False
+
     #--- Event handlers
     def date_range_changed(self):
         self.refresh(refresh_view=False)
