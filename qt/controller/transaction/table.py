@@ -22,12 +22,18 @@ class TransactionTableDelegate(TableDelegate):
         TableDelegate.__init__(self, model)
         arrow = QPixmap(':/right_arrow_gray_12')
         arrowSelected = QPixmap(':/right_arrow_white_12')
+        # Generates a set of pixmaps for each currency type on initialization
+        # I know we probably have a lot of containing class being created, so
+        # there is a lot of redundant pixmaps being generated.  Just trying
+        # to get something down on paper here.
         self._currency_pixs = CurrencyPixs()
         self._decoFromArrow = ItemDecoration(arrow, self._model.show_from_account)
         self._decoFromArrowSelected = ItemDecoration(arrowSelected, self._model.show_from_account)
         self._decoToArrow = ItemDecoration(arrow, self._model.show_to_account)
         self._decoToArrowSelected = ItemDecoration(arrowSelected, self._model.show_to_account)
 
+    # I thought left aligned decorations might look nicer for the currencies
+    # so this is here just to make that happen
     def paint(self, painter, option, index):
         column = self._model.columns.column_by_index(index.column())
 
@@ -43,10 +49,13 @@ class TransactionTableDelegate(TableDelegate):
             return [self._decoFromArrowSelected if isSelected else self._decoFromArrow]
         elif column.name == 'to':
             return [self._decoToArrowSelected if isSelected else self._decoToArrow]
+        # We check the overarching model to see if the current set of tranactions has
+        # multiple currencies
         elif column.name == 'amount' and self._model.has_multiple_currencies:
             try:
                 amount = self._model.rows[index.row()].transaction.amount
                 if hasattr(amount, 'currency'):
+                    # Lookup the generated pixmap by it's code
                     return [self._currency_pixs.currency_decorations[amount.currency.code]]
                 else:
                     return []
@@ -76,6 +85,8 @@ class TransactionTable(TableWithTransactions):
         self.view.sortByColumn(1, Qt.AscendingOrder) # sorted by date by default
         self.view.deletePressed.connect(self.model.delete)
 
+    # Don't want to see the redundant currency information as text
+    # at least not for the demo
     def _getData(self, row, column, role):
         if role in (Qt.DisplayRole, Qt.EditRole) and column.name == 'amount':
             if hasattr(row, 'transaction'):

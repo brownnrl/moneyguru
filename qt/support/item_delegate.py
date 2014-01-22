@@ -15,6 +15,7 @@ from PyQt4.QtCore import Qt, QPoint
 from PyQt4.QtGui import QStyledItemDelegate, QStyleOptionViewItemV4, QStyle
 from PyQt4.QtGui import QFont, QPixmap, QPainter
 
+# Terrible place for all this, but here we are looking up the codes
 from hscommon.currency import BUILTIN_CURRENCY_CODES
 
 ItemDecoration = namedtuple('ItemDecoration', 'pixmap onClickCallable')
@@ -79,6 +80,7 @@ class ItemDelegate(QStyledItemDelegate):
             editor.prepareDataForCommit()
         QStyledItemDelegate.setModelData(self, editor, model, index)
 
+# For each code, generate a transparent pixmap with the text inserted
 def paint_currency_code(code):
     pix = QPixmap(12*3, 15)
     pix.fill(Qt.transparent)
@@ -87,6 +89,7 @@ def paint_currency_code(code):
 
     return pix
 
+# A function to run through each code and populate a list of pixmaps
 def generate_currency_pix_maps():
     return_pixs = []
     
@@ -96,6 +99,7 @@ def generate_currency_pix_maps():
 
     return return_pixs
 
+# A class to click off the initialization of the pixmaps.
 class CurrencyPixs:
     def __init__(self):
         self.currency_pixs = generate_currency_pix_maps()

@@ -90,6 +90,9 @@ class TransactionTable(TransactionTableBase):
     def selected_transactions(self):
         return [row.transaction for row in self.selected_rows if hasattr(row, 'transaction')]
 
+    # Checks to see if the current table with its current rows has more than one currency
+    # type represented in it.  This should probably be more than one currency type that
+    # isn't the default currency type.
     @property
     def has_multiple_currencies(self):
 
