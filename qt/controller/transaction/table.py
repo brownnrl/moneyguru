@@ -18,6 +18,8 @@ from ..table_with_transactions import TableWithTransactions
 
 from core.gui.transaction_table import TotalRow
 
+
+# Had to copy this to get the amount field with both currency and value information
 try:
     if os.environ.get('USE_PY_AMOUNT'):
         raise ImportError()
@@ -27,6 +29,10 @@ except ImportError:
     from core.model._amount_ref import Amount
 
 class Del:
+    """
+    Del class for cleaning input:
+    See http://stackoverflow.com/questions/1450897/python-removing-characters-except-digits-from-string
+    """
     def __init__(self, keep):
         self.keep = dict((ord(c), c) for c in keep)
 
@@ -41,15 +47,21 @@ class TransactionTableDelegate(TableDelegate):
         TableDelegate.__init__(self, model)
         arrow = QPixmap(':/right_arrow_gray_12')
         arrowSelected = QPixmap(':/right_arrow_white_12')
+
+        # The view is needed to set the column size.
+        # I also use it to get the current font, but that might be available through
+        # the option parameter... I don't know if this is the appropriate location
+        # to set the column width.
         self._view = view
         amount_index = self._model.columns.column_by_name('amount').ordered_index
-        print(amount_index)
         self._view.horizontalHeader().setResizeMode(amount_index, QHeaderView.ResizeToContents)
+
         self._decoFromArrow = ItemDecoration(arrow, self._model.show_from_account)
         self._decoFromArrowSelected = ItemDecoration(arrowSelected, self._model.show_from_account)
         self._decoToArrow = ItemDecoration(arrow, self._model.show_to_account)
         self._decoToArrowSelected = ItemDecoration(arrowSelected, self._model.show_to_account)
 
+        # Used to remove non-digit characters
         self._valid_chars = list(string.digits)
         self._valid_chars.extend([',', '.'])
         self._keep_chars = Del(self._valid_chars)
@@ -64,6 +76,11 @@ class TransactionTableDelegate(TableDelegate):
             return []
 
     def _get_amount_from_index(self, index):
+        """
+        Used by both the sizeHint and paintEvent methods for fetching
+        the current amount data from the model for the given index and
+        making sure currency information is supported.
+        """
         if not index.isValid():
             return None
 
@@ -85,7 +102,13 @@ class TransactionTableDelegate(TableDelegate):
         return amount
 
     def _get_amount_texts(self, amount, option):
+        """
+        Used by both sizeHint and paintEvent to determine size of the column and
+        what to write to the cells
+        """
         do_paint_currency = amount.currency != self._model.document.default_currency
+        # Use the currently formatted string just remove the currency information
+        # for separate painting.
         val_string = self._model.document.format_amount(amount).translate(self._keep_chars)
         cur_code = amount.currency.code
         cur_width = option.fontMetrics.width(amount.currency.code) if do_paint_currency else 0
@@ -95,6 +118,9 @@ class TransactionTableDelegate(TableDelegate):
 
 
     def sizeHint(self, option, index):
+        """
+        Used by Qt to set the column widths for the amount column
+        """
 
         amount = self._get_amount_from_index(index)
 
@@ -108,8 +134,10 @@ class TransactionTableDelegate(TableDelegate):
         return QSize(cur_width+val_width+5, option.fontMetrics.height())
 
 
-    def _paint_currency(self, painter, option, amount, is_selected):
-
+    def _paint_amount(self, painter, option, amount, is_selected):
+        """
+        Paint the amount to the cell.
+        """
         option = QStyleOptionViewItemV4(option)
 
         painter.setFont(self._view.font())
@@ -153,10 +181,10 @@ class TransactionTableDelegate(TableDelegate):
         if amount is None:
             return
 
-        self._paint_currency(painter,
-                             option,
-                             amount,
-                             is_selected)
+        self._paint_amount(painter,
+                           option,
+                           amount,
+                           is_selected)
 
     
 
