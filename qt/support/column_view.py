@@ -23,8 +23,8 @@ class AmountColumnDelegate(ColumnDelegate):
 
         cur_width, val_width = self._get_amount_text_widths(amount, option)
 
-        # Add some extra spacing in between (15)
-        return QSize(cur_width+val_width+15, option.fontMetrics.height())
+        # Add some extra spacing in between (15) and padding on sides (4,1)
+        return QSize(4+cur_width+15+val_width+1, option.fontMetrics.height())
 
     def _get_data_from_index(self, index):
         if not index.isValid():
@@ -80,14 +80,14 @@ class AmountColumnDelegate(ColumnDelegate):
             painter.setPen(Qt.black)
 
         if do_paint_currency:
-            painter.drawText(QRectF(option.rect.left(),
+            painter.drawText(QRectF(4+option.rect.left(),
                                     option.rect.top(),
                                     cur_width,
                                     font_height),
                              column_data.currency,
                              QTextOption(Qt.AlignVCenter))
 
-        painter.drawText(QRectF(option.rect.right() - val_width,
+        painter.drawText(QRectF(option.rect.right() - val_width - 1,
                                 option.rect.top(),
                                 val_width,
                                 font_height),
