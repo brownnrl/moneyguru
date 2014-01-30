@@ -16,7 +16,7 @@ from ..table_with_transactions import TableWithTransactions
 
 
 class TransactionTableDelegate(TableDelegate):
-    def __init__(self, ui_model, model):
+    def __init__(self, model):
         TableDelegate.__init__(self, model)
         arrow = QPixmap(':/right_arrow_gray_12')
         arrowSelected = QPixmap(':/right_arrow_white_12')
@@ -24,6 +24,7 @@ class TransactionTableDelegate(TableDelegate):
         self._decoFromArrowSelected = ItemDecoration(arrowSelected, self._model.show_from_account)
         self._decoToArrow = ItemDecoration(arrow, self._model.show_to_account)
         self._decoToArrowSelected = ItemDecoration(arrowSelected, self._model.show_to_account)
+        self._testArrow = ItemDecoration(arrow, lambda *args: None)
     
     def _get_decorations(self, index, isSelected):
         column = self._model.columns.column_by_index(index.column())
@@ -31,6 +32,8 @@ class TransactionTableDelegate(TableDelegate):
             return [self._decoFromArrowSelected if isSelected else self._decoFromArrow]
         elif column.name == 'to':
             return [self._decoToArrowSelected if isSelected else self._decoToArrow]
+        elif column.name == 'amount':
+            return [self._testArrow]
         else:
             return []
 
@@ -53,7 +56,7 @@ class TransactionTable(TableWithTransactions):
     
     def __init__(self, model, view):
         TableWithTransactions.__init__(self, model, view)
-        self.tableDelegate = TransactionTableDelegate(self, self.model)
+        self.tableDelegate = TransactionTableDelegate(self.model)
         self.view.setItemDelegate(self.tableDelegate)
         self.view.sortByColumn(1, Qt.AscendingOrder) # sorted by date by default
         self.view.deletePressed.connect(self.model.delete)

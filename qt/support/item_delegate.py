@@ -21,6 +21,9 @@ class ItemDelegate(QStyledItemDelegate):
         # side of the cell. If you want them to be clickable, set onClickCallable with an argument-
         # less function.
         return []
+
+    def _get_value_painter(self, index):
+        return None
     
     def _prepare_paint_options(self, option, index):
         # Don't set option directly in `paint` but here. This way, there won't be any trouble with
@@ -28,6 +31,17 @@ class ItemDelegate(QStyledItemDelegate):
         pass
     
     #--- Overrides
+
+    def sizeHint(self, option, index):
+        value_painter = self._get_value_painter(index)
+        if value_painter is None:
+            return QStyledItemDelegate.sizeHint(self, option, index)
+        decs = self._get_decorations(index, bool(option.state & QStyle.State_Selected))
+        pix_widths = [dec.pixmap.width() for dec in decs]
+        size = value_painter.sizeHint(option, index)
+        size.setWidth(size.width() + sum(pix_widths))
+        return size
+
     def handleClick(self, index, pos, itemRect, selected):
         decorations = self._get_decorations(index, selected)
         currentRight = itemRect.right()
@@ -60,6 +74,13 @@ class ItemDelegate(QStyledItemDelegate):
             rect = QRect(x, y, pixmap.width(), pixmap.height())
             painter.drawPixmap(rect, pixmap)
             xOffset += pixmap.width()
+        value_painter = self._get_value_painter(index)
+        if value_painter is not None:
+            value_option = QStyleOptionViewItemV4(option)
+            rect = value_option.rect
+            rect = QRect(rect.left(), rect.top(), rect.width() - xOffset, rect.height())
+            value_option.rect = rect
+            value_painter.paint(painter, value_option, index)
     
     def setModelData(self, editor, model, index):
         # This call below is to give a chance to the editor to tweak its content a little bit before

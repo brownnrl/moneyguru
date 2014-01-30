@@ -23,14 +23,8 @@ class Table(QAbstractTableModel):
         self.view.setModel(self)
         self.model.view = self
 
-        self._custom_column_painters = set()
-
         if hasattr(self.model, 'columns'):
             self.columns = Columns(self.model.columns, self.COLUMNS, view.horizontalHeader())
-
-            for column in self.model.columns.column_list:
-                if column.painter is not None:
-                    self._custom_column_painters.add(column.name)
         
         self.view.selectionModel().selectionChanged[(QItemSelection, QItemSelection)].connect(self.selectionChanged)
     
@@ -60,10 +54,7 @@ class Table(QAbstractTableModel):
     def _getData(self, row, column, role):
 
         attrname = column.name
-        if role == Qt.DisplayRole and attrname in self._custom_column_painters:
-            # Hackity hack hack hack hack hack hack hack hack...
-            if "total" in row.__class__.__name__.lower(): # HACK!!!!  I'm not sure how I would do this otherwise.
-                return row.get_cell_value(attrname)
+        if role == Qt.DisplayRole and column.painter is not None:
             return None
         elif role in (Qt.DisplayRole, Qt.EditRole):
             return row.get_cell_value(attrname)

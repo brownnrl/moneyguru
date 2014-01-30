@@ -36,6 +36,12 @@ class TableDelegate(ItemDelegate):
         for column in self._model.columns.column_list:
             if column.painter == AMOUNT_PAINTER:
                 self._column_painters[column.name] = AmountColumnDelegate(column.name, self._model)
+
+    def _get_value_painter(self, index):
+        column = self._model.columns.column_by_index(index.column())
+
+        if column.name in self._column_painters:
+            return self._column_painters[column.name]
     
     def createEditor(self, parent, option, index):
         column = self._model.columns.column_by_index(index.column())
@@ -46,37 +52,6 @@ class TableDelegate(ItemDelegate):
             return DateEdit(parent)
         elif editType in EDIT_TYPE2COMPLETABLE_EDIT:
             return EDIT_TYPE2COMPLETABLE_EDIT[editType](self._model.completable_edit, parent)
-
-    def sizeHint(self, option, index):
-        column = self._model.columns.column_by_index(index.column())
-
-        if column.name not in self._column_painters:
-            return ItemDelegate.sizeHint(self, option, index)
-
-        size_hint = self._column_painters[column.name].sizeHint(option, index)
-
-        if size_hint is None:
-            return ItemDelegate.sizeHint(self, option, index)
-
-        return size_hint
-
-    def paint(self, painter, option, index):
-        # Paint cells as we normally would
-        ItemDelegate.paint(self, painter, option, index)
-
-        column = self._model.columns.column_by_index(index.column())
-
-        if column.name not in self._column_painters:
-            return
-
-        column_painter = self._column_painters[column.name]
-
-        column_data = column_painter._get_data_from_index(index)
-
-        if column_data is None:
-            return
-
-        column_painter._paint_column_data(painter, option, column_data)
 
 
 class Table(TableBase):
@@ -95,6 +70,9 @@ class Table(TableBase):
         self.view.setFont(font)
         fm = QFontMetrics(font)
         self.view.verticalHeader().setDefaultSectionSize(fm.height()+2)
+        # (#14, #15) This was added for the custom painting of
+        # amount fields and their columns.
+        self.view.resize(self.view.sizeHint())
 
     def appPrefsChanged(self):
         self._updateFontSize()
