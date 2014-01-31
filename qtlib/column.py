@@ -47,7 +47,7 @@ class Columns:
 
         for column in self.model.column_list:
             if column.resizeToFit:
-                self._headerView.setResizeMode(column.ordered_index, QHeaderView.ResizeToContents)
+                self._headerView.setResizeMode(column.logical_index, QHeaderView.ResizeToContents)
     
     #--- Public
     def setColumnsWidth(self, widths):
