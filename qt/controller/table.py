@@ -11,7 +11,7 @@ from PyQt4.QtGui import QFontMetrics
 from qtlib.table import Table as TableBase, ItemFlags
 
 from ..support.completable_edit import DescriptionEdit, PayeeEdit, AccountEdit
-from ..support.column_view import AmountColumnDelegate
+from ..support.column_view import AmountPainter
 from ..support.date_edit import DateEdit
 from ..support.item_delegate import ItemDelegate
 
@@ -20,6 +20,8 @@ DESCRIPTION_EDIT = 'description_edit'
 PAYEE_EDIT = 'payee_edit'
 ACCOUNT_EDIT = 'account_edit'
 
+# See #14, #15 Added to indicate an amount to be painted to a table
+# with nicely aligned currency / value
 AMOUNT_PAINTER = 'amount_painter'
 
 EDIT_TYPE2COMPLETABLE_EDIT = {
@@ -35,7 +37,8 @@ class TableDelegate(ItemDelegate):
         self._column_painters = {}
         for column in self._model.columns.column_list:
             if column.painter == AMOUNT_PAINTER:
-                self._column_painters[column.name] = AmountColumnDelegate(column.name, self._model)
+                # See #14, #15.
+                self._column_painters[column.name] = AmountPainter(column.name, self._model)
 
     def _get_value_painter(self, index):
         column = self._model.columns.column_by_index(index.column())

@@ -14,6 +14,8 @@ class Column:
         self.attrname = attrname
         self.defaultWidth = defaultWidth
         self.editor = editor
+        # See moneyguru #15. Painter attribute was added to allow custom painting of amount value and
+        # currency information. Can be used as a pattern for custom painting of any column.
         self.painter = painter
         self.alignment = alignment
         # This is to indicate, during printing, that a column can't have its data truncated.
@@ -45,6 +47,7 @@ class Columns:
         self._headerView.sectionMoved.connect(self.headerSectionMoved)
         self._headerView.sectionResized.connect(self.headerSectionResized)
 
+        # See moneyguru #14 and #15.  This was added in order to allow automatic resizing of columns.
         for column in self.model.column_list:
             if column.resizeToFit:
                 self._headerView.setResizeMode(column.logical_index, QHeaderView.ResizeToContents)

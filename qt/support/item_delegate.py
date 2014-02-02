@@ -17,12 +17,39 @@ ItemDecoration = namedtuple('ItemDecoration', 'pixmap onClickCallable')
 class ItemDelegate(QStyledItemDelegate):
     #--- Virtual
     def _get_decorations(self, index, isSelected):
+        """Returns a list of ItemDecorations which are drawn during the paint event.
+
+        The list returned of instances of ItemDecoration will be drawn in the appropriate
+        field.  If the decorations should perform a function, the second value of the
+        tuple (onClickCallable property) should be set to an argument-less function.
+
+        Args:
+            index - QModelIndex
+
+        Returns:
+            List of instances of ItemDecoration
+
+        """
         # Must return a list of ItemDecoration for each little image you want to put at the right
         # side of the cell. If you want them to be clickable, set onClickCallable with an argument-
         # less function.
         return []
 
     def _get_value_painter(self, index):
+        """Returns a value painter used to paint the data contained at the index.
+
+        Returns an instance of an object that will be used to do custom painting of the
+        value of the data within the model at the specified index.  This object should
+        have a paint and sizeHint method in order to determine the size required to paint
+        the value and a method to do that painting.
+
+        Args:
+            index - QModelIndex
+
+        Returns:
+            An object that has a paint and sizeHint method.
+
+        """
         return None
     
     def _prepare_paint_options(self, option, index):
@@ -33,6 +60,21 @@ class ItemDelegate(QStyledItemDelegate):
     #--- Overrides
 
     def sizeHint(self, option, index):
+        """Returns a QSize bounding box of the area required to paint the data in the model at the index.
+
+        Returns the size of the bounding box of the area required to paint the data in the model
+        at the specified index.  This is the sum of decoration pixmap widths, and the sizeHint provided
+        by the custom value_painter if it exists.
+
+        Args:
+            option - QStyleOptionViewItemV4
+            index - QModelIndex
+
+        Returns:
+            A QSize bounding box of the size required to paint the value of the data in the model plus
+            decorations.
+
+        """
         value_painter = self._get_value_painter(index)
         if value_painter is None:
             return QStyledItemDelegate.sizeHint(self, option, index)
@@ -53,6 +95,16 @@ class ItemDelegate(QStyledItemDelegate):
             currentRight -= pixmap.width()
     
     def paint(self, painter, option, index):
+        """Performs custom painting of value of data in the model and decorations.
+
+         Performs custom painting of value of data in the model at the specified index
+         plus any decorations used in that column.
+
+         Args:
+            painter - QPainter
+            option - QStyleOptionViewItemV4
+            index - QModelIndex
+        """
         self.initStyleOption(option, index)
         # I don't know why I have to do this. option.version returns 4, but still, when I try to
         # access option.features, boom-crash. The workaround is to force a V4.
@@ -74,6 +126,8 @@ class ItemDelegate(QStyledItemDelegate):
             rect = QRect(x, y, pixmap.width(), pixmap.height())
             painter.drawPixmap(rect, pixmap)
             xOffset += pixmap.width()
+        # First added for #15, the painting of custom amount information.  This can
+        # be used as a pattern for painting any column of information.
         value_painter = self._get_value_painter(index)
         if value_painter is not None:
             value_option = QStyleOptionViewItemV4(option)
