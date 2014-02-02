@@ -14,26 +14,40 @@ from collections import namedtuple
 from PyQt4.QtCore import QRectF, QSize, Qt
 from PyQt4.QtGui import QStyleOptionViewItemV4, QStyle, QTextOption
 
+import re
+import logging
+
+CURR_VALUE_RE = re.compile(r"([^\d]{3} )?(.*)")
 # Simple named tuple to separate the currency from the value
 DisplayAmount = namedtuple('DisplayAmount', 'currency value')
 
 class AmountColumnDelegate(ColumnDelegate):
 
+    def __init__(self, attr_name, model):
+        self._attr_name = attr_name
+        self._model = model
+
+
     def _get_data_from_index(self, index):
         if not index.isValid():
             return None
         column = self._model.columns.column_by_index(index.column())
-        if column.name != self._column_name:
+        if column.name != self._attr_name:
             return None
-        amount = getattr(self._model[index.row()], column.name).split(" ")
-        if len(amount) == 2:
-            return DisplayAmount(amount[0], amount[1])
-        return DisplayAmount("", amount[0])
+        amount = getattr(self._model[index.row()], column.name)
 
-    def _get_amount_text_widths(self, amount, option):
-        """
-        Used by both sizeHint and paintEvent to determine size of the column and
-        what to write to the cells
+        amount = CURR_VALUE_RE.match(amount)
+
+        if amount is None:
+            logging.warning("Amount for column %s index row %s "
+                            "with amount '%s' did not match regular "
+                            "expression for amount painting." %
+                            (column.name, index.row(), amount))
+            return None
+
+        amount = amount.groups()
+
+        return DisplayAmount("" if amount[0] is None else amount[0].strip(), amount[1])
         """
         do_paint_currency = amount.currency != ""
         # Use the currently formatted string just remove the currency information
