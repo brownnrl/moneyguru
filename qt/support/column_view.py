@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Created By: Nelson Brown
 # Created On: 2014-02-01
 # Copyright 2014 Hardcoded Software (http://www.hardcoded.net)
@@ -16,6 +15,8 @@ from PyQt4.QtGui import QStyleOptionViewItemV4, QStyle, QTextOption
 
 import re
 import logging
+
+from hscommon.util import nonone
 
 CURR_VALUE_RE = re.compile(r"([^\d]{3} )?(.*)")
 
@@ -61,13 +62,13 @@ class AmountPainter:
         if amount is None:
             logging.warning("Amount for column %s index row %s "
                             "with amount '%s' did not match regular "
-                            "expression for amount painting." %
-                            (column.name, index.row(), amount))
+                            "expression for amount painting.",
+                            column.name, index.row(), amount)
             return None
 
         amount = amount.groups()
 
-        return DisplayAmount("" if amount[0] is None else amount[0].strip(), amount[1])
+        return DisplayAmount(nonone(amount[0], "").strip(), amount[1])
 
     def _getAmountTextWidths(self, amount, option):
         """Converts DisplayAmount into a tuple of currency and value widths.
