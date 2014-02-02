@@ -24,7 +24,6 @@ class TransactionTableDelegate(TableDelegate):
         self._decoFromArrowSelected = ItemDecoration(arrowSelected, self._model.show_from_account)
         self._decoToArrow = ItemDecoration(arrow, self._model.show_to_account)
         self._decoToArrowSelected = ItemDecoration(arrowSelected, self._model.show_to_account)
-        self._testArrow = ItemDecoration(arrow, lambda *args: None)
     
     def _get_decorations(self, index, isSelected):
         column = self._model.columns.column_by_index(index.column())
@@ -32,14 +31,9 @@ class TransactionTableDelegate(TableDelegate):
             return [self._decoFromArrowSelected if isSelected else self._decoFromArrow]
         elif column.name == 'to':
             return [self._decoToArrowSelected if isSelected else self._decoToArrow]
-        elif column.name == 'amount':
-            return [self._testArrow]
         else:
             return []
 
-
-
-    
 
 class TransactionTable(TableWithTransactions):
     COLUMNS = [
