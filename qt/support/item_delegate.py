@@ -88,32 +88,3 @@ class ItemDelegate(QStyledItemDelegate):
         if hasattr(editor, 'prepareDataForCommit'):
             editor.prepareDataForCommit()
         QStyledItemDelegate.setModelData(self, editor, model, index)
-
-
-class ColumnDelegate(object):
-
-    def __init__(self, column_name, model):
-        self._column_name = column_name
-        self._model = model
-
-    @property
-    def column_name(self):
-        return self._column_name
-
-    def sizeHint(self, option, index):
-        pass
-
-    def _get_data_from_index(self, index):
-        pass
-
-    def _paint_column_data(self, painter, option, column_data):
-        pass
-
-    def paint(self, column_name, painter, option, index):
-
-        column_data = self._get_data_from_index(index)
-
-        if column_data is None:
-            return
-
-        self._paint_column_data(column_name, painter, option, column_data)

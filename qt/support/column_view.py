@@ -21,7 +21,7 @@ CURR_VALUE_RE = re.compile(r"([^\d]{3} )?(.*)")
 # Simple named tuple to separate the currency from the value
 DisplayAmount = namedtuple('DisplayAmount', 'currency value')
 
-class AmountColumnDelegate(ColumnDelegate):
+class AmountPainter:
 
     def __init__(self, attr_name, model):
         self._attr_name = attr_name
