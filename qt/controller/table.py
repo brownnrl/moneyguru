@@ -70,8 +70,10 @@ class Table(TableBase):
         self.view.setFont(font)
         fm = QFontMetrics(font)
         self.view.verticalHeader().setDefaultSectionSize(fm.height()+2)
-        # (#14, #15) This was added for the custom painting of
-        # amount fields and their columns.
+        # (#14, #15) When a new font was selected in the preferences panel,
+        # the column would redraw but not resize appropriately.  A call
+        # to resize(sizeHint()) was added on the update of the size info
+        # in the custom drawing for the amount field.
         self.view.resize(self.view.sizeHint())
 
     def appPrefsChanged(self):
