@@ -2,9 +2,9 @@
 # Created By: Virgil Dupras
 # Created On: 2010-01-07
 # Copyright 2014 Hardcoded Software (http://www.hardcoded.net)
-# 
-# This software is licensed under the "BSD" License as described in the "LICENSE" file, 
-# which should be included with this package. The terms are also available at 
+#
+# This software is licensed under the "BSD" License as described in the "LICENSE" file,
+# which should be included with this package. The terms are also available at
 # http://www.hardcoded.net/licenses/bsd_license
 
 from collections import namedtuple
@@ -56,7 +56,7 @@ class ItemDelegate(QStyledItemDelegate):
         # Don't set option directly in `paint` but here. This way, there won't be any trouble with
         # option being overwritten.
         pass
-    
+
     #--- Overrides
 
     def sizeHint(self, option, index):
@@ -85,15 +85,17 @@ class ItemDelegate(QStyledItemDelegate):
         return size
 
     def handleClick(self, index, pos, itemRect, selected):
+        # Returns True if at one of the decorations were in the hit zone.
         decorations = self._get_decorations(index, selected)
         currentRight = itemRect.right()
         for dec in decorations:
             pixmap = dec.pixmap
             if pos.x() >= currentRight - pixmap.width():
                 dec.onClickCallable()
-                break
+                return True
             currentRight -= pixmap.width()
-    
+        return False
+
     def paint(self, painter, option, index):
         """Performs custom painting of value of data in the model and decorations.
 
@@ -142,3 +144,4 @@ class ItemDelegate(QStyledItemDelegate):
         if hasattr(editor, 'prepareDataForCommit'):
             editor.prepareDataForCommit()
         QStyledItemDelegate.setModelData(self, editor, model, index)
+

@@ -1,6 +1,6 @@
 # Created By: Eric Mc Sween
 # Created On: 2007-12-12
-# Copyright 2013 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2014 Hardcoded Software (http://www.hardcoded.net)
 # 
 # This software is licensed under the "BSD" License as described in the "LICENSE" file, 
 # which should be included with this package. The terms are also available at 
@@ -31,6 +31,12 @@ def test_parse_date():
     eq_(parse_date('07-01-02', 'yy-MM-dd'), date(2007, 1, 2))
     eq_(parse_date('07-1-2', 'yy-M-d'), date(2007, 1, 2))
     eq_(parse_date('16 sep 2012', 'dd MMM yyyy'), date(2012, 9, 16))
+
+    # Test cases for #381
+    eq_(parse_date('1 /20/2014', 'M/d/yyyy'), date(2014, 1, 20))
+    eq_(parse_date('1/20/2014', 'M/d/yyyy'), date(2014, 1, 20))
+    eq_(parse_date('1  20 2014', 'M d yyyy'), date(2014, 1, 20))
+    eq_(parse_date('1 20 2014', 'M d yyyy'), date(2014, 1, 20))
 
 def test_format_date():
     eq_(format_date(date(2007, 10, 11), 'dd/MM/yyyy'), '11/10/2007')

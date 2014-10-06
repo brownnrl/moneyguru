@@ -1,5 +1,5 @@
 /* 
-Copyright 2013 Hardcoded Software (http://www.hardcoded.net)
+Copyright 2014 Hardcoded Software (http://www.hardcoded.net)
 
 This software is licensed under the "BSD" License as described in the "LICENSE" file, 
 which should be included with this package. The terms are also available at 
@@ -15,7 +15,6 @@ http://www.hardcoded.net/licenses/bsd_license
 #import "MGScheduleView.h"
 #import "MGBudgetView.h"
 #import "MGGeneralLedgerView.h"
-#import "MGCashculatorView.h"
 #import "MGDocPropsView.h"
 #import "MGEmptyView.h"
 #import "MGReadOnlyPluginView.h"
@@ -180,9 +179,6 @@ http://www.hardcoded.net/licenses/bsd_license
     }
     else if (paneType == MGPaneTypeBudget) {
         return [[[MGBudgetView alloc] initWithPyRef:modelRef] autorelease];
-    }
-    else if (paneType == MGPaneTypeCashculator) {
-        return [[[MGCashculatorView alloc] initWithPyRef:modelRef] autorelease];
     }
     else if (paneType == MGPaneTypeGeneralLedger) {
         return [[[MGGeneralLedgerView alloc] initWithPyRef:modelRef] autorelease];

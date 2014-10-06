@@ -1,4 +1,4 @@
-# Copyright 2013 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2014 Hardcoded Software (http://www.hardcoded.net)
 # 
 # This software is licensed under the "BSD" License as described in the "LICENSE" file, 
 # which should be included with this package. The terms are also available at 
@@ -918,20 +918,6 @@ class PyBudgetView(PyBaseView):
 class PyScheduleView(PyBaseView):
     def table(self) -> pyref:
         return self.model.table
-    
-
-class PyCashculatorView(PyBaseView):
-    def table(self) -> pyref:
-        return self.model.atable
-    
-    def exportDB(self):
-        self.model.export_db()
-    
-    def launchCC(self):
-        self.model.launch_cc()
-    
-    def resetCCDB(self):
-        self.model.reset_ccdb()
     
 
 class PyGeneralLedgerView(PyBaseView):

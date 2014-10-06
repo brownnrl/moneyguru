@@ -1,6 +1,6 @@
 # Created By: Virgil Dupras
 # Created On: 2007-10-06
-# Copyright 2013 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2014 Hardcoded Software (http://www.hardcoded.net)
 
 # This software is licensed under the "BSD" License as described in the "LICENSE" file, 
 # which should be included with this package. The terms are also available at 
@@ -12,6 +12,7 @@ import traceback
 import subprocess
 import sys
 
+from hscommon.error_report import send_error_report
 from .CocoaProxy import CocoaProxy
 
 proxy = CocoaProxy()
@@ -97,7 +98,8 @@ def report_crash(type, value, tb):
         except IndexError:
             # This can happen if something went wrong with the grep (permission errors?)
             pass
-    proxy.reportCrash_(s)
+    if proxy.reportCrash_(s):
+        send_error_report(s)
 
 def install_exception_hook():
     sys.excepthook = report_crash

@@ -1,7 +1,5 @@
 .DS_Store
-*.pyc
 *.so
-*.pyd
 *.mo
 *.dmg
 *.back.aip
@@ -9,6 +7,7 @@ __pycache__
 build
 env
 _build
+.tox
 /conf.json
 /cocoa/Info.plist
 /cocoa/build
@@ -22,8 +21,13 @@ build
 dist
 install
 installer_tmp-cache
-/devdoc_html
+deps
 /run.py
 /help/*/conf.py
 /help/*/changelog.rst
+/help/*/credits.rst
 /help/*/image
+
+# ctags
+tags
+

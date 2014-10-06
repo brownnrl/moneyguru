@@ -1,6 +1,6 @@
 # Created By: Virgil Dupras
 # Created On: 2009-05-09
-# Copyright 2013 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2014 Hardcoded Software (http://www.hardcoded.net)
 # 
 # This software is licensed under the "BSD" License as described in the "LICENSE" file, 
 # which should be included with this package. The terms are also available at 
@@ -15,17 +15,14 @@ from hscommon.trans import trget
 tr = trget('qtlib')
 
 class AboutBox(QDialog):
-    def __init__(self, parent, app, withreg=True):
+    def __init__(self, parent, app):
         flags = Qt.CustomizeWindowHint | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.MSWindowsFixedSizeDialogHint
         QDialog.__init__(self, parent, flags)
         self.app = app
-        self.withreg = withreg
         self._setupUi()
         
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
-        if self.withreg:
-            self.buttonBox.clicked.connect(self.buttonClicked)
     
     def _setupUi(self):
         self.setWindowTitle(tr("About {}").format(QCoreApplication.instance().applicationName()))
@@ -52,29 +49,18 @@ class AboutBox(QDialog):
         self.verticalLayout.addWidget(self.versionLabel)
         self.label_3 = QLabel(self)
         self.verticalLayout.addWidget(self.label_3)
-        self.label_3.setText(tr("Copyright Hardcoded Software 2013"))
+        self.label_3.setText(tr("Copyright Hardcoded Software 2014"))
         self.label = QLabel(self)
         font = QFont()
         font.setWeight(75)
         font.setBold(True)
         self.label.setFont(font)
         self.verticalLayout.addWidget(self.label)
-        self.registeredEmailLabel = QLabel(self)
-        if self.withreg:
-            self.registeredEmailLabel.setText(tr("UNREGISTERED"))
-        self.verticalLayout.addWidget(self.registeredEmailLabel)
         self.buttonBox = QDialogButtonBox(self)
         self.buttonBox.setOrientation(Qt.Horizontal)
         self.buttonBox.setStandardButtons(QDialogButtonBox.Ok)
-        if self.withreg:
-            self.registerButton = self.buttonBox.addButton(tr("Register"), QDialogButtonBox.ActionRole)
         self.verticalLayout.addWidget(self.buttonBox)
         self.horizontalLayout.addLayout(self.verticalLayout)
-    
-    #--- Events
-    def buttonClicked(self, button):
-        if button is self.registerButton:
-            self.app.askForRegCode()
     
 
 if __name__ == '__main__':
