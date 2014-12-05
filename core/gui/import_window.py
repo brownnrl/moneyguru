@@ -10,11 +10,16 @@
 # unit, we rename our imported first() function here
 from hscommon.util import flatten, dedupe, first as getfirst
 from hscommon.trans import tr
+from hscommon.notify import Listener
+
+import logging
 
 from ..exception import OperationAborted
 from ..model.date import DateFormat
 from .base import MainWindowGUIObject, LinkedSelectableList
 from .import_table import ImportTable
+
+from core.plugin import ImportActionPlugin
 
 DAY = 'day'
 MONTH = 'month'
@@ -49,6 +54,113 @@ def swap_format_elements(format, first, second):
     elems[first_index], elems[second_index] = elems[second_index], elems[first_index]
     return swapped
 
+class InvertAmountsPlugin(ImportActionPlugin):
+
+    NAME = "Invert Amounts Import Action Plugin"
+    ACTION_NAME = "Invert Amount"
+
+    def perform_action(self, selected_pane, panes, transactions):
+        for txn in transactions:
+            for split in txn.splits:
+                split.amount = -split.amount
+
+
+class BaseSwapFields(ImportActionPlugin):
+
+    def _switch_function(self, transaction):
+        pass
+
+    def perform_action(self, selected_pane, panes, transactions):
+        for txn in transactions:
+            self._switch_function(txn)
+
+
+class SwapDescriptionPayeeAction(BaseSwapFields):
+
+    ACTION_NAME = tr("Description <--> Payee")
+    NAME = "Swap Description Payee Import Action Plugin"
+
+    def _switch_function(self, txn):
+        txn.description, txn.payee = txn.payee, txn.description
+
+
+class BaseSwapDateFields(BaseSwapFields):
+
+    def __init__(self):
+        super().__init__()
+        self._first_field = None
+        self._second_field = None
+
+    def _switch_function(self, transaction):
+        transaction.date = swapped_date(transaction.date, self._first_field, self._second_field)
+
+    def on_selected_pane_changed(self, selected_pane):
+        self._change_name(selected_pane)
+
+    def _change_name(self, selected_pane):
+        if selected_pane is None:
+            return
+
+        basefmt = selected_pane.parsing_date_format
+        swapped = swap_format_elements(basefmt, self._first_field, self._second_field)
+        self.ACTION_NAME = "{} --> {}".format(basefmt.iso_format, swapped.iso_format)
+        self.notify(self.action_name_changed)
+
+    def can_perform_action(self, selected_pane, panes, transactions):
+        try:
+            for txn in transactions:
+                swapped_date(txn.date, self._first_field, self._second_field)
+            return True
+        except ValueError:
+            return False
+
+    def perform_action(self, selected_pane, panes, transactions):
+        super().perform_action(selected_pane, panes, transactions)
+        # Now, lets' change the date format on these panes
+        for pane in panes:
+            basefmt = selected_pane.parsing_date_format
+            swapped = swap_format_elements(basefmt, self._first_field, self._second_field)
+            pane.parsing_date_format = swapped
+        # We'll update our name to reflect the new date format
+        self._change_name(selected_pane)
+
+
+class SwapDayMonth(BaseSwapDateFields):
+
+    ACTION_NAME = "<placeholder> Day <--> Month"
+
+    NAME = "Swap Day and Month Import Action Plugin"
+
+    def __init__(self):
+        super().__init__()
+        self._first_field = DAY
+        self._second_field = MONTH
+
+
+class SwapDayYear(BaseSwapDateFields):
+
+    ACTION_NAME = "<placeholder> Day <--> Year"
+
+    NAME = "Swap Day and Year Import Action Plugin"
+
+    def __init__(self):
+        super().__init__()
+        self._first_field = DAY
+        self._second_field = YEAR
+
+
+class SwapMonthYear(BaseSwapDateFields):
+
+    ACTION_NAME = "<placeholder> Month <--> Year"
+
+    NAME = "Swap Month and Year Import Action Plugin"
+
+    def __init__(self):
+        super().__init__()
+        self._first_field = MONTH
+        self._second_field = YEAR
+
+
 class AccountPane:
     def __init__(self, account, target_account, parsing_date_format):
         self.account = account
@@ -61,21 +173,6 @@ class AccountPane:
         self.max_month = 12
         self.max_year = 99 # 2 digits
         self._match_entries()
-        self._swap_possibilities = set()
-        self._compute_swap_possibilities()
-
-    def _compute_swap_possibilities(self):
-        entries = self.account.entries[:]
-        if not entries:
-            return
-        self._swap_possibilities = set([(DAY, MONTH), (MONTH, YEAR), (DAY, YEAR)])
-        for first, second in self._swap_possibilities.copy():
-            for entry in entries:
-                try:
-                    swapped_date(entry.date, first, second)
-                except ValueError:
-                    self._swap_possibilities.remove((first, second))
-                    break
 
     def _match_entries(self):
         to_import = self.account.entries[:]
@@ -102,15 +199,11 @@ class AccountPane:
     def _sort_matches(self):
         self.matches.sort(key=lambda t: t[0].date if t[0] is not None else t[1].date)
 
-
     def bind(self, existing, imported):
         [match1] = [m for m in self.matches if m[0] is existing]
         [match2] = [m for m in self.matches if m[1] is imported]
         match1[1] = match2[1]
         self.matches.remove(match2)
-
-    def can_swap_date_fields(self, first, second): # 'day', 'month', 'year'
-        return (first, second) in self._swap_possibilities or (second, first) in self._swap_possibilities
 
     def unbind(self, existing, imported):
         [match] = [m for m in self.matches if m[0] is existing and m[1] is imported]
@@ -143,37 +236,42 @@ class ImportWindow(MainWindowGUIObject):
         MainWindowGUIObject.__init__(self, mainwindow)
         self._selected_pane_index = 0
         self._selected_target_index = 0
+        self._import_action_plugins = [SwapDayMonth(),
+                                       SwapMonthYear(),
+                                       SwapDayYear(),
+                                       SwapDescriptionPayeeAction(),
+                                       InvertAmountsPlugin()]  # TODO : + plugins from plugin dir
+        self._import_action_listeners = [Listener(plugin) for plugin in self._import_action_plugins]
+        for index, listener in enumerate(self._import_action_listeners):
+            listener.bind_messages((ImportActionPlugin.action_name_changed,),
+                                   lambda idx=index: self._refresh_swap_list_items(idx))
+            listener.connect()
+
+        logging.debug(self._import_action_plugins)
 
         def setfunc(index):
             self.view.set_swap_button_enabled(self.can_perform_swap())
         self.swap_type_list = LinkedSelectableList(items=[
-            "<placeholder> Day <--> Month",
-            "<placeholder> Month <--> Year",
-            "<placeholder> Day <--> Year",
-            tr("Description <--> Payee"),
-            tr("Invert Amounts"),
+            plugin.ACTION_NAME for plugin in self._import_action_plugins
         ], setfunc=setfunc)
         self.swap_type_list.selected_index = SwapType.DayMonth
         self.panes = []
         self.import_table = ImportTable(self)
 
     #--- Private
-    def _can_swap_date_fields(self, first, second): # 'day', 'month', 'year'
-        pane = self.selected_pane
-        if pane is None:
-            return False
-        return pane.can_swap_date_fields(first, second)
 
-    def _invert_amounts(self, apply_to_all):
+    def _collect_action_params(self, apply_to_all):
         if apply_to_all:
             panes = self.panes
         else:
             panes = [self.selected_pane]
         entries = flatten(p.account.entries for p in panes)
         txns = dedupe(e.transaction for e in entries)
-        for txn in txns:
-            for split in txn.splits:
-                split.amount = -split.amount
+        return panes, entries, txns
+
+    def _perform_action(self, import_action, apply_to_all):
+        panes, entries, txns = self._collect_action_params(apply_to_all)
+        import_action.perform_action(self.selected_pane, panes, txns)
         # Entries, I don't remember why, hold a copy of their split's amount. It has to be updated.
         for entry in entries:
             entry.amount = entry.split.amount
@@ -190,54 +288,21 @@ class ImportWindow(MainWindowGUIObject):
             except ValueError:
                 pass
 
-    def _refresh_swap_list_items(self):
+    def _refresh_swap_list_items(self, index=-1):
         if not self.panes:
             return
-        items = []
-        basefmt = self.selected_pane.parsing_date_format
-        for first, second in [(DAY, MONTH), (MONTH, YEAR), (DAY, YEAR)]:
-            swapped = swap_format_elements(basefmt, first, second)
-            items.append("{} --> {}".format(basefmt.iso_format, swapped.iso_format))
-        self.swap_type_list[:3] = items
 
-    def _swap_date_fields(self, first, second, apply_to_all): # 'day', 'month', 'year'
-        assert self._can_swap_date_fields(first, second)
-        if apply_to_all:
-            panes = [p for p in self.panes if p.can_swap_date_fields(first, second)]
+        if index != -1:
+            import_action = self._import_action_plugins[index]
+            self.swap_type_list[index] = import_action.ACTION_NAME
         else:
-            panes = [self.selected_pane]
-
-        def switch_func(txn):
-            txn.date = swapped_date(txn.date, first, second)
-
-        self._swap_fields(panes, switch_func)
-        # Now, lets' change the date format on these panes
-        for pane in panes:
-            basefmt = self.selected_pane.parsing_date_format
-            swapped = swap_format_elements(basefmt, first, second)
-            pane.parsing_date_format = swapped
-        self._refresh_swap_list_items()
-
-    def _swap_description_payee(self, apply_to_all):
-        if apply_to_all:
-            panes = self.panes
-        else:
-            panes = [self.selected_pane]
-
-        def switch_func(txn):
-            txn.description, txn.payee = txn.payee, txn.description
-
-        self._swap_fields(panes, switch_func)
-
-    def _swap_fields(self, panes, switch_func):
-        entries = flatten(p.account.entries for p in panes)
-        txns = dedupe(e.transaction for e in entries)
-        for txn in txns:
-            switch_func(txn)
-        self.import_table.refresh()
+            names = [plugin.ACTION_NAME for plugin in self._import_action_plugins]
+            self.swap_type_list[:] = names
 
     def _update_selected_pane(self):
         self.import_table.refresh()
+        for plugin in self._import_action_plugins:
+            plugin.on_selected_pane_changed(self.selected_pane)
         self._refresh_swap_list_items()
         self.view.update_selected_pane()
         self.view.set_swap_button_enabled(self.can_perform_swap())
@@ -252,14 +317,9 @@ class ImportWindow(MainWindowGUIObject):
     #--- Public
     def can_perform_swap(self):
         index = self.swap_type_list.selected_index
-        if index == SwapType.DayMonth:
-            return self._can_swap_date_fields(DAY, MONTH)
-        elif index == SwapType.MonthYear:
-            return self._can_swap_date_fields(MONTH, YEAR)
-        elif index == SwapType.DayYear:
-            return self._can_swap_date_fields(DAY, YEAR)
-        else:
-            return True
+        panes, _, txns = self._collect_action_params(True)
+        import_action = self._import_action_plugins[index]
+        return import_action.can_perform_action(self.selected_pane, panes, txns)
 
     def close_pane(self, index):
         was_selected = index == self.selected_pane_index
@@ -291,16 +351,8 @@ class ImportWindow(MainWindowGUIObject):
 
     def perform_swap(self, apply_to_all=False):
         index = self.swap_type_list.selected_index
-        if index == SwapType.DayMonth:
-            self._swap_date_fields(DAY, MONTH, apply_to_all=apply_to_all)
-        elif index == SwapType.MonthYear:
-            self._swap_date_fields(MONTH, YEAR, apply_to_all=apply_to_all)
-        elif index == SwapType.DayYear:
-            self._swap_date_fields(DAY, YEAR, apply_to_all=apply_to_all)
-        elif index == SwapType.DescriptionPayee:
-            self._swap_description_payee(apply_to_all=apply_to_all)
-        elif index == SwapType.InvertAmount:
-            self._invert_amounts(apply_to_all=apply_to_all)
+        import_action = self._import_action_plugins[index]
+        self._perform_action(import_action, apply_to_all)
 
     def refresh_targets(self):
         self.target_accounts = [a for a in self.document.accounts if a.is_balance_sheet_account()]

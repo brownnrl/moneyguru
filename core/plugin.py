@@ -24,6 +24,7 @@ from datetime import date
 from hscommon.gui.column import Column # noqa
 from hscommon.currency import Currency, CurrencyNotSupportedException
 
+from hscommon.notify import Broadcaster
 from .gui.base import BaseView
 from .gui.table import GUITable, Row
 from .const import PaneType
@@ -236,3 +237,57 @@ class CurrencyProviderPlugin(Plugin):
         """
         raise NotImplementedError()
 
+
+class ImportActionPlugin(Plugin, Broadcaster):
+    """
+    Plugin allowing certain kinds of actions to be performed on import.
+
+    By subclassing this plugin, you can add new currencies to moneyGuru and also add a new source
+    to fetch those currencies' exchange rates.
+
+    Subclasses :class:`Plugin`, :class:`Broadcaster`
+    """
+
+    # Signal to the import window to change the name in our drop down list
+    action_name_changed = 'action_name_changed'
+
+    # The name that appears in our drop down list
+    ACTION_NAME = None
+
+    def on_selected_pane_changed(self, selected_pane):
+        """
+        This method is called whenever the import window has changed it's selected pane.
+
+        :param core.gui.import_window.AccountPane selected_pane: Currently selected pane or None if no pane selected
+        """
+        pass
+
+    def always_perform_action(self):
+        """
+        Eventually, this will be used to query whether every single possible transaction should
+        always have this action performed instead of using the single click 'Fix' button.
+        """
+        return False
+
+    def can_perform_action(self, selected_pane, panes, transactions):
+        """
+        You shouldn't make any modifications to the provided transactions or panes.  But you can query the attributes
+        inside these parameters to determine if the user is given the ability to use your action.
+
+        :param core.gui.import_window.AccountPane selected_pane: Currently selected pane or None if no pane selected
+        :param list panes: List of the panes currently open in the import window
+        :param list transactions: A list of :class:`core.model.transaction.Transaction` objects (each row of the import table)
+        """
+        return True
+
+    def perform_action(self, selected_pane, panes, transactions):
+        """
+        Go to town!  Most likely, you'll want to modify the transactions (changing the individual
+        rows) but you can also look up interesting information about account names through the
+        selected_pane or panes and their account attribute.
+
+        :param core.gui.import_window.AccountPane selected_pane: Currently selected pane or None if no pane selected
+        :param list panes: List of the panes currently open in the import window
+        :param list transactions: A list of :class:`core.model.transaction.Transaction` objects (each row of the import table)
+        """
+        pass
