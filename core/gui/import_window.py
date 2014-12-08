@@ -242,9 +242,9 @@ class ImportWindow(MainWindowGUIObject):
                                        SwapDescriptionPayeeAction(),
                                        InvertAmountsPlugin()]  # TODO : + plugins from plugin dir
         self._import_action_listeners = [Listener(plugin) for plugin in self._import_action_plugins]
-        for index, listener in enumerate(self._import_action_listeners):
+        for listener in self._import_action_listeners:
             listener.bind_messages((ImportActionPlugin.action_name_changed,),
-                                   lambda idx=index: self._refresh_swap_list_items(idx))
+                                   lambda : self._refresh_swap_list_items())
             listener.connect()
 
         logging.debug(self._import_action_plugins)
@@ -260,17 +260,24 @@ class ImportWindow(MainWindowGUIObject):
 
     #--- Private
 
-    def _collect_action_params(self, apply_to_all):
+    def _collect_action_params(self, import_action, apply_to_all):
         if apply_to_all:
-            panes = self.panes
+            panes = self.panes.copy()
         else:
             panes = [self.selected_pane]
+
+        for p in panes.copy():
+            entries = p.account.entries
+            txns = dedupe(e.transaction for e in entries)
+            if not import_action.can_perform_action(p, [p], txns):
+                panes.remove(p)
+
         entries = flatten(p.account.entries for p in panes)
         txns = dedupe(e.transaction for e in entries)
         return panes, entries, txns
 
     def _perform_action(self, import_action, apply_to_all):
-        panes, entries, txns = self._collect_action_params(apply_to_all)
+        panes, entries, txns = self._collect_action_params(import_action, apply_to_all)
         import_action.perform_action(self.selected_pane, panes, txns)
         # Entries, I don't remember why, hold a copy of their split's amount. It has to be updated.
         for entry in entries:
@@ -288,16 +295,21 @@ class ImportWindow(MainWindowGUIObject):
             except ValueError:
                 pass
 
-    def _refresh_swap_list_items(self, index=-1):
+    def _refresh_swap_list_items(self):
         if not self.panes:
             return
 
-        if index != -1:
-            import_action = self._import_action_plugins[index]
-            self.swap_type_list[index] = import_action.ACTION_NAME
-        else:
-            names = [plugin.ACTION_NAME for plugin in self._import_action_plugins]
-            self.swap_type_list[:] = names
+        # I think, possibly due to the "XXX should be replaced with _updated_selected...
+        # comment that exists refresh panes, we aren't kicking off the seleced pane change
+        # in time.  So we'll just tell it that the selected pane changed even if it hasn't.
+
+        for index, plugin in enumerate(self._import_action_plugins):
+            self._import_action_listeners[index].disconnect()
+            plugin.on_selected_pane_changed(self.selected_pane)
+            self._import_action_listeners[index].connect()
+        names = [plugin.ACTION_NAME for plugin in self._import_action_plugins]
+        self.swap_type_list[:] = names
+
 
     def _update_selected_pane(self):
         self.import_table.refresh()
@@ -317,9 +329,17 @@ class ImportWindow(MainWindowGUIObject):
     #--- Public
     def can_perform_swap(self):
         index = self.swap_type_list.selected_index
-        panes, _, txns = self._collect_action_params(True)
         import_action = self._import_action_plugins[index]
-        return import_action.can_perform_action(self.selected_pane, panes, txns)
+        panes, _, txns = self._collect_action_params(import_action, True)
+        # We actually perform can_perform_action as part of the _collect_action_params
+        # so we don't need to run the explicit check twice, just check to see if
+        # the seleced pane was one of the "passing" panes.
+        # Also, we consider having no panes unable to perform all actions (mimicing
+        # prior implementation)
+        if panes == []:
+            return False
+
+        return self.selected_pane in panes
 
     def close_pane(self, index):
         was_selected = index == self.selected_pane_index
