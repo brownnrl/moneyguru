@@ -14,6 +14,12 @@ from ..base import TestApp, with_app, DictLoader, testdata
 from ...model.date import YearRange
 from ...gui.import_window import SwapType
 
+from core.app import Application
+from core.plugin import ImportActionPlugin
+from core.tests.base import ApplicationGUI
+from core.model.account import AccountType
+
+
 #--- No setup
 
 @with_app(TestApp)
@@ -391,6 +397,10 @@ def test_can_switch_fields_on_low_day(app):
 @with_app(app_import_txns_with_low_day_fields)
 def test_switch_day_month(app):
     app.iwin.swap_type_list.select(SwapType.DayMonth)
+    app.iwin.import_table.refresh()
+    eq_(app.itable[0].date_import, '05/11/2008')
+    eq_(app.itable[1].date_import, '12/01/2009')
+    eq_(app.itable[2].date_import, '01/02/2009')
     app.iwin.perform_swap()
     eq_(app.itable[0].date_import, '11/05/2008')
     eq_(app.itable[1].date_import, '01/12/2009')
@@ -508,3 +518,90 @@ def test_switch_description_payee_with_common_txn(app):
     app.iwin.perform_swap(apply_to_all=True)
     eq_(app.itable[0].description_import, 'bar')
     eq_(app.itable[0].payee_import, 'foo')
+
+#---
+def app_with_custom_import_plugin():
+
+    class ChangeTransfer(ImportActionPlugin):
+        """
+        The point of this plugin is to change any transfer with the
+        phrase 'automatic payment' to a checking account.
+        """
+
+        def always_perform_action(self):
+            return True
+
+        def perform_action(self, selected_pane, panes, transactions):
+            import_doc = selected_pane.import_document
+            auto_pays = []
+
+            # We go through all of our transactions searching for the keyword
+            # automatic.
+            for txn in transactions:
+                for split in txn.splits:
+                    if 'automatic' in split.account_name.lower():
+                        # We collect up the actual account names marked for transfer
+                        auto_pays.append(split.account_name)
+
+            if not auto_pays:
+                return
+
+            checking = import_doc.accounts.find('checking')
+
+            if checking is None:
+                # Create a checking account if no checking account is present
+                # in our current list of transactions
+                checking = import_doc.new_account(AccountType.Asset, None)  # No group
+                import_doc.accounts.set_account_name(checking, 'checking')
+
+            # Reassign our transfers to checking
+            auto_pay_accounts = [import_doc.accounts.find(ap) for ap in auto_pays]
+            import_doc.delete_accounts(auto_pay_accounts, checking)
+
+    class CustomPluginsApp(Application):
+        def _load_plugins(self, plugin_path):
+            self.plugins = [ChangeTransfer]
+
+    app = TestApp(app=CustomPluginsApp(ApplicationGUI()))
+
+    txns = [
+        {
+            'date': '12/09/2014',
+            'transfer': 'AUTOMATIC PAYMENT - THANK YOU',
+            'description': 'foo',
+            'payee': 'bar',
+            'amount': '-3.21'
+        },
+        {
+            'date': '12/10/2014',
+            'transfer': 'PAYMENT AUTOMATICALLY RECEIVED',
+            'description': 'foo',
+            'payee': 'bar',
+            'amount': '-20.22'
+        },
+        {
+            'date': '12/10/2014',
+            'transfer': 'GAS',
+            'description': 'foo',
+            'payee': 'bar',
+            'amount': '20.23'
+        }
+    ]
+
+    loader = DictLoader(app.doc.default_currency, 'first', txns)
+    loader.start_account()
+    loader.account_info.name = 'second'
+    loader.flush_account()
+    loader.load()
+    app.mw.loader = loader
+    app.iwin.show()
+    return app
+
+@with_app(app_with_custom_import_plugin)
+def test_switch_transfer_accounts(app):
+    # same as with dates: don't switch twice
+    app.iwin.swap_type_list.select(SwapType.DescriptionPayee)
+    app.iwin.perform_swap(apply_to_all=True)
+    eq_(app.itable[0].transfer_import, 'checking')
+    eq_(app.itable[1].transfer_import, 'checking')
+    eq_(app.itable[2].transfer_import, 'GAS')

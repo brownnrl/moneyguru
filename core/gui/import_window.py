@@ -21,6 +21,8 @@ from .import_table import ImportTable
 
 from core.plugin import ImportActionPlugin
 
+from core.document import Document
+
 DAY = 'day'
 MONTH = 'month'
 YEAR = 'year'
@@ -60,9 +62,12 @@ class InvertAmountsPlugin(ImportActionPlugin):
     ACTION_NAME = "Invert Amount"
 
     def perform_action(self, selected_pane, panes, transactions):
-        for txn in transactions:
-            for split in txn.splits:
-                split.amount = -split.amount
+        for pane in panes:
+            for transaction in pane.import_document.transactions:
+                new = transaction.replicate()
+                for split in new.splits:
+                    split.amount = -split.amount
+                pane.import_document.change_transaction(transaction, new)
 
 
 class BaseSwapFields(ImportActionPlugin):
@@ -71,8 +76,12 @@ class BaseSwapFields(ImportActionPlugin):
         pass
 
     def perform_action(self, selected_pane, panes, transactions):
-        for txn in transactions:
-            self._switch_function(txn)
+        for pane in panes:
+            import_document = pane.import_document
+            for txn in import_document.transactions.copy():
+                new = txn.replicate()
+                self._switch_function(new)
+                import_document.change_transaction(txn, new)
 
 
 class SwapDescriptionPayeeAction(BaseSwapFields):
@@ -161,8 +170,31 @@ class SwapMonthYear(BaseSwapDateFields):
         self._second_field = YEAR
 
 
+class ImportDocument(Document):
+
+    def __init__(self, app):
+        Document.__init__(self, app)
+        self.force_date_format = None
+
+    @property
+    def ahead_months(self):
+        return 0
+
+    def _get_dateformat(self):
+        if self.force_date_format is None:
+            return Document._get_dateformat()
+        else:
+            return self.force_date_format
+
+    def _cook(self, from_date=None):
+        self.select_all_transactions_range()
+        self.oven.cook(from_date=self.date_range.start, until_date=self.date_range.end)
+
+
 class AccountPane:
-    def __init__(self, account, target_account, parsing_date_format):
+    def __init__(self, app, account, target_account, parsing_date_format):
+        self.import_document = ImportDocument(app)
+        self.import_document.force_date_format = parsing_date_format
         self.account = account
         self._selected_target = target_account
         self.name = account.name
@@ -172,9 +204,14 @@ class AccountPane:
         self.max_day = 31
         self.max_month = 12
         self.max_year = 99 # 2 digits
-        self._match_entries()
+        self.import_document.import_entries(account,
+                                            account,
+                                            [[entry, None] for entry in self.account.entries[:]])
+        self.match_entries()
 
-    def _match_entries(self):
+
+    def match_entries(self):
+        self.account = self.import_document.accounts.find(self.name)
         to_import = self.account.entries[:]
         reference2entry = {}
         for entry in (e for e in to_import if e.reference):
@@ -218,7 +255,7 @@ class AccountPane:
     @selected_target.setter
     def selected_target(self, value):
         self._selected_target = value
-        self._match_entries()
+        self.match_entries()
 
 
 class ImportWindow(MainWindowGUIObject):
@@ -240,12 +277,12 @@ class ImportWindow(MainWindowGUIObject):
                                        SwapMonthYear(),
                                        SwapDayYear(),
                                        SwapDescriptionPayeeAction(),
-                                       InvertAmountsPlugin()]  # TODO : + plugins from plugin dir
-        self._import_action_listeners = [Listener(plugin) for plugin in self._import_action_plugins]
-        for listener in self._import_action_listeners:
-            listener.bind_messages((ImportActionPlugin.action_name_changed,),
-                                   lambda : self._refresh_swap_list_items())
-            listener.connect()
+                                       InvertAmountsPlugin()]
+        self._always_import_action_plugins = []
+
+        self._import_action_listeners = []
+        self._add_plugin_listeners(self._import_action_plugins)
+        self._recieve_plugins(self.app.plugins)
 
         logging.debug(self._import_action_plugins)
 
@@ -277,12 +314,23 @@ class ImportWindow(MainWindowGUIObject):
         return panes, entries, txns
 
     def _perform_action(self, import_action, apply_to_all):
+        if self.selected_pane is None:
+            return
         panes, entries, txns = self._collect_action_params(import_action, apply_to_all)
-        import_action.perform_action(self.selected_pane, panes, txns)
+        if panes:  # If there are no relevant panes, we shouldn't perform the action
+            import_action.perform_action(self.selected_pane, panes, txns)
+
+        for pane in panes:
+            pane.match_entries()
         # Entries, I don't remember why, hold a copy of their split's amount. It has to be updated.
-        for entry in entries:
-            entry.amount = entry.split.amount
+        #for entry in entries:
+        #    entry.amount = entry.split.amount
+
         self.import_table.refresh()
+
+    def _always_perform_actions(self):
+        for plugin in self._always_import_action_plugins:
+            self._perform_action(plugin, True)
 
     def _refresh_target_selection(self):
         if not self.panes:
@@ -310,14 +358,35 @@ class ImportWindow(MainWindowGUIObject):
         names = [plugin.ACTION_NAME for plugin in self._import_action_plugins]
         self.swap_type_list[:] = names
 
-
     def _update_selected_pane(self):
+        if self.selected_pane:
+            self.selected_pane.match_entries()
         self.import_table.refresh()
         for plugin in self._import_action_plugins:
             plugin.on_selected_pane_changed(self.selected_pane)
         self._refresh_swap_list_items()
         self.view.update_selected_pane()
         self.view.set_swap_button_enabled(self.can_perform_swap())
+
+    def _recieve_plugins(self, plugins):
+        extended_plugins = [plugin() for plugin in plugins
+                            if issubclass(plugin, ImportActionPlugin)]
+
+        select_actions = [p for p in extended_plugins if not p.always_perform_action()]
+        always_actions = [p for p in extended_plugins if p.always_perform_action()]
+
+        self._import_action_plugins.extend(select_actions)
+        self._add_plugin_listeners(select_actions)
+        self._always_import_action_plugins.extend(always_actions)
+
+    def _add_plugin_listeners(self, plugins):
+        listeners = [Listener(plugin) for plugin in plugins
+                     if not plugin.always_perform_action()]
+        for listener in listeners:
+            listener.bind_messages((ImportActionPlugin.action_name_changed,),
+                                   lambda: self._refresh_swap_list_items())
+            listener.connect()
+            self._import_action_listeners.append(listener)
 
     #--- Override
     def _view_updated(self):
@@ -327,6 +396,7 @@ class ImportWindow(MainWindowGUIObject):
             self.document_restoring_preferences()
 
     #--- Public
+
     def can_perform_swap(self):
         index = self.swap_type_list.selected_index
         import_action = self._import_action_plugins[index]
@@ -350,7 +420,6 @@ class ImportWindow(MainWindowGUIObject):
         self._selected_pane_index = min(self._selected_pane_index, len(self.panes) - 1)
         if was_selected:
             self._update_selected_pane()
-
 
     def import_selected_pane(self):
         pane = self.selected_pane
@@ -381,6 +450,7 @@ class ImportWindow(MainWindowGUIObject):
     def refresh_panes(self):
         if not hasattr(self.mainwindow, 'loader'):
             return
+
         self.refresh_targets()
         accounts = [a for a in self.mainwindow.loader.accounts if a.is_balance_sheet_account() and a.entries]
         parsing_date_format = DateFormat.from_sysformat(self.mainwindow.loader.parsing_date_format)
@@ -392,10 +462,14 @@ class ImportWindow(MainWindowGUIObject):
                 target_account = getfirst(
                     t for t in self.target_accounts if t.reference == account.reference
                 )
-            self.panes.append(AccountPane(account, target_account, parsing_date_format))
+            self.panes.append(AccountPane(self.app, account, target_account, parsing_date_format))
         # XXX Should replace by _update_selected_pane()?
+
+        self._always_perform_actions()
         self._refresh_target_selection()
         self._refresh_swap_list_items()
+        if self.selected_pane:
+            self.selected_pane.match_entries()
         self.import_table.refresh()
 
     def show(self):

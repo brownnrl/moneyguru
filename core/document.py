@@ -167,6 +167,9 @@ class Document(Repeater, GUIObject):
         if len(existing_names) >= AUTOSAVE_BUFFER_COUNT:
             os.remove(op.join(self.app.cache_path, existing_names[0]))
 
+    def _get_dateformat(self):
+        return DATE_FORMAT_FOR_PREFERENCES
+
     def _change_transaction(
             self, transaction, date=NOEDIT, description=NOEDIT, payee=NOEDIT,
             checkno=NOEDIT, from_=NOEDIT, to=NOEDIT, amount=NOEDIT, currency=NOEDIT,
@@ -269,10 +272,10 @@ class Document(Repeater, GUIObject):
     def _restore_preferences(self):
         start_date = self.app.get_default(SELECTED_DATE_RANGE_START_PREFERENCE)
         if start_date:
-            start_date = datetime.datetime.strptime(start_date, DATE_FORMAT_FOR_PREFERENCES).date()
+            start_date = datetime.datetime.strptime(start_date, self._get_dateformat()).date()
         end_date = self.app.get_default(SELECTED_DATE_RANGE_END_PREFERENCE)
         if end_date:
-            end_date = datetime.datetime.strptime(end_date, DATE_FORMAT_FOR_PREFERENCES).date()
+            end_date = datetime.datetime.strptime(end_date, self._get_dateformat()).date()
         selected_range = self.app.get_default(SELECTED_DATE_RANGE_PREFERENCE)
         if selected_range == DATE_RANGE_MONTH:
             self.select_month_range(start_date)
@@ -313,9 +316,9 @@ class Document(Repeater, GUIObject):
         elif isinstance(dr, CustomDateRange):
             selected_range = DATE_RANGE_CUSTOM
         self.app.set_default(SELECTED_DATE_RANGE_PREFERENCE, selected_range)
-        str_start_date = dr.start.strftime(DATE_FORMAT_FOR_PREFERENCES)
+        str_start_date = dr.start.strftime(self._get_dateformat())
         self.app.set_default(SELECTED_DATE_RANGE_START_PREFERENCE, str_start_date)
-        str_end_date = dr.end.strftime(DATE_FORMAT_FOR_PREFERENCES)
+        str_end_date = dr.end.strftime(self._get_dateformat())
         self.app.set_default(SELECTED_DATE_RANGE_END_PREFERENCE, str_end_date)
         excluded_account_names = [a.name for a in self.excluded_accounts]
         self.set_default(EXCLUDED_ACCOUNTS_PREFERENCE, excluded_account_names)
