@@ -402,17 +402,23 @@ def test_switch_day_month(app):
     eq_(app.itable[1].date_import, '12/01/2009')
     eq_(app.itable[2].date_import, '01/02/2009')
     app.iwin.perform_swap()
+    # Note that we now have re-ordered entries.
+    # And the action performed updates our changes.
     eq_(app.itable[0].date_import, '11/05/2008')
-    eq_(app.itable[1].date_import, '01/12/2009')
-    eq_(app.itable[2].date_import, '02/01/2009')
+    eq_(app.itable[1].date_import, '02/01/2009')
+    eq_(app.itable[2].date_import, '01/12/2009')
 
 @with_app(app_import_txns_with_low_day_fields)
 def test_switch_day_year(app):
     app.iwin.swap_type_list.select(SwapType.DayYear)
+    app.iwin.import_table.refresh()
+    eq_(app.itable[0].date_import, '05/11/2008')
+    eq_(app.itable[1].date_import, '12/01/2009')
+    eq_(app.itable[2].date_import, '01/02/2009')
     app.iwin.perform_swap()
-    eq_(app.itable[0].date_import, '08/11/2005')
-    eq_(app.itable[1].date_import, '09/01/2012')
-    eq_(app.itable[2].date_import, '09/02/2001')
+    eq_(app.itable[0].date_import, '09/02/2001')
+    eq_(app.itable[1].date_import, '08/11/2005')
+    eq_(app.itable[2].date_import, '09/01/2012')
 
 
 #---
@@ -525,7 +531,7 @@ def app_with_custom_import_plugin():
     class ChangeTransfer(ImportActionPlugin):
         """
         The point of this plugin is to change any transfer with the
-        phrase 'automatic payment' to a checking account.
+        phrase 'automatic' to a checking account.
         """
 
         def always_perform_action(self):

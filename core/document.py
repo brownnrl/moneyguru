@@ -1387,3 +1387,69 @@ class Document(Repeater, GUIObject):
         # this is called async
         self._async_autosave()
 
+
+class ImportDocument(Document):
+    """
+    A document used as a "staging area" for imports, using overrides to
+    simplify it's operations with some basic assumptions.
+    """
+
+    def __init__(self, app):
+        Document.__init__(self, app)
+        self.force_date_format = None
+
+    def _async_autosave(self):
+        pass
+
+    @property
+    def ahead_months(self):
+        return 0
+
+    def _query_for_scope_if_needed(self, transactions):
+        # I'm not 100% sure of what global vs. local scope
+        # entails, but I think it has to do with spawn transactions.
+
+        # Since we don't import spawns, we shouldn't need the
+        # global scope.  I don't know though, maybe we do.  :)
+        return False
+
+    def _get_dateformat(self):
+
+        # We sometimes want to utilize the parsing date format
+        # vs the application date format, so this method was added
+        # to override that default behavior in document.
+        if self.force_date_format is None:
+            return Document._get_dateformat()
+        else:
+            return self.force_date_format
+
+    def select_all_transactions_range(self):
+        """Sets :attr:`date_range` to a :class:`.AllTransactionsRange`."""
+        if not self.transactions:
+            return
+
+        # Our import document can have actions performed which jumble the order
+        # of existing transactions.
+        # Since we don't import schedules, and cooking is basically just to
+        # generate entries, we end up having to find the earliest and latest
+        # transactions in an unordered list.
+        dates = [txn.date for txn in self.transactions]
+        first_date = min(dates)
+        last_date = max(dates)
+        self.date_range = AllTransactionsRange(
+            first_date=first_date, last_date=last_date,
+            ahead_months=self.ahead_months
+        )
+
+    def cook(self):
+        """Refresh account entries for the purpose of importing.
+        Unlike the main document, the import document sometimes has specific actions
+        it performs.  We don't want to cook after every action, but at select points
+        in the import cycle. This requires the import window to be able to tell it
+        to re-do it's account entries.
+        """
+        self.select_all_transactions_range()
+        self.oven.cook(from_date=self.date_range.start, until_date=self.date_range.end)
+
+    def _cook(self, from_date=None):
+        pass

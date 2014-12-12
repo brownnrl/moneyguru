@@ -20,8 +20,7 @@ from .base import MainWindowGUIObject, LinkedSelectableList
 from .import_table import ImportTable
 
 from core.plugin import ImportActionPlugin
-
-from core.document import Document
+from core.document import ImportDocument
 
 DAY = 'day'
 MONTH = 'month'
@@ -76,12 +75,14 @@ class BaseSwapFields(ImportActionPlugin):
         pass
 
     def perform_action(self, selected_pane, panes, transactions):
-        for pane in panes:
-            import_document = pane.import_document
-            for txn in import_document.transactions.copy():
-                new = txn.replicate()
-                self._switch_function(new)
-                import_document.change_transaction(txn, new)
+        if selected_pane is None:
+            return
+
+        import_document = selected_pane.import_document
+        for txn in transactions:
+            new = txn.replicate()
+            self._switch_function(new)
+            import_document.change_transaction(txn, new)
 
 
 class SwapDescriptionPayeeAction(BaseSwapFields):
@@ -169,32 +170,9 @@ class SwapMonthYear(BaseSwapDateFields):
         self._first_field = MONTH
         self._second_field = YEAR
 
-
-class ImportDocument(Document):
-
-    def __init__(self, app):
-        Document.__init__(self, app)
-        self.force_date_format = None
-
-    @property
-    def ahead_months(self):
-        return 0
-
-    def _get_dateformat(self):
-        if self.force_date_format is None:
-            return Document._get_dateformat()
-        else:
-            return self.force_date_format
-
-    def _cook(self, from_date=None):
-        self.select_all_transactions_range()
-        self.oven.cook(from_date=self.date_range.start, until_date=self.date_range.end)
-
-
 class AccountPane:
-    def __init__(self, app, account, target_account, parsing_date_format):
-        self.import_document = ImportDocument(app)
-        self.import_document.force_date_format = parsing_date_format
+    def __init__(self, import_document, account, target_account, parsing_date_format):
+        self.import_document = import_document
         self.account = account
         self._selected_target = target_account
         self.name = account.name
@@ -204,9 +182,6 @@ class AccountPane:
         self.max_day = 31
         self.max_month = 12
         self.max_year = 99 # 2 digits
-        self.import_document.import_entries(account,
-                                            account,
-                                            [[entry, None] for entry in self.account.entries[:]])
         self.match_entries()
 
 
@@ -271,6 +246,7 @@ class ImportWindow(MainWindowGUIObject):
 
     def __init__(self, mainwindow):
         MainWindowGUIObject.__init__(self, mainwindow)
+        self.import_document = ImportDocument(self.app)
         self._selected_pane_index = 0
         self._selected_target_index = 0
         self._import_action_plugins = [SwapDayMonth(),
@@ -304,8 +280,7 @@ class ImportWindow(MainWindowGUIObject):
             panes = [self.selected_pane]
 
         for p in panes.copy():
-            entries = p.account.entries
-            txns = dedupe(e.transaction for e in entries)
+            txns = dedupe(e.transaction for e in p.account.entries[:])
             if not import_action.can_perform_action(p, [p], txns):
                 panes.remove(p)
 
@@ -319,6 +294,8 @@ class ImportWindow(MainWindowGUIObject):
         panes, entries, txns = self._collect_action_params(import_action, apply_to_all)
         if panes:  # If there are no relevant panes, we shouldn't perform the action
             import_action.perform_action(self.selected_pane, panes, txns)
+
+        self.import_document.cook()
 
         for pane in panes:
             pane.match_entries()
@@ -451,10 +428,14 @@ class ImportWindow(MainWindowGUIObject):
         if not hasattr(self.mainwindow, 'loader'):
             return
 
+        # self.import_document.force_date_format = parsing_date_format
+
         self.refresh_targets()
         accounts = [a for a in self.mainwindow.loader.accounts if a.is_balance_sheet_account() and a.entries]
+
         parsing_date_format = DateFormat.from_sysformat(self.mainwindow.loader.parsing_date_format)
         for account in accounts:
+            self.import_document.import_entries(account, account, [[entry, None] for entry in account.entries[:]])
             target_account = None
             if self.mainwindow.loader.target_account is not None:
                 target_account = self.mainwindow.loader.target_account
@@ -462,7 +443,7 @@ class ImportWindow(MainWindowGUIObject):
                 target_account = getfirst(
                     t for t in self.target_accounts if t.reference == account.reference
                 )
-            self.panes.append(AccountPane(self.app, account, target_account, parsing_date_format))
+            self.panes.append(AccountPane(self.import_document, account, target_account, parsing_date_format))
         # XXX Should replace by _update_selected_pane()?
 
         self._always_perform_actions()
