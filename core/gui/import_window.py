@@ -209,6 +209,9 @@ class EquivalenceBind(ImportBindPlugin):
             for index, import_split in enumerate(import_splits):
                 existing_split = existing_splits[index]
 
+                if (existing_split.account is None) != (import_split is None):
+                    return False
+
                 if import_split.amount.value != existing_split.amount.value or \
                    import_split.account.name.lower() != existing_split.account.name.lower():
                     return False
@@ -304,6 +307,8 @@ class AccountPane:
 
             if entry in processed:
                 return
+            elif not is_import and entry.reconciled:
+                processed.add(entry)
             elif match_entry:
                 self.matches.append([match_entry.existing, match_entry.imported])
                 processed.add(match_entry.existing)
@@ -312,11 +317,11 @@ class AccountPane:
                 self.matches.append([None, entry] if is_import else [entry, None])
                 processed.add(entry)
 
-        for import_entry in import_entries:
-            append_entry(import_entry, True)
-
         for existing_entry in existing_entries:
             append_entry(existing_entry, False)
+
+        for import_entry in import_entries:
+            append_entry(import_entry, True)
 
     def match_entries(self):
         self.account = self.import_document.accounts.find(self.name)

@@ -1395,8 +1395,9 @@ class ImportDocument(Document):
     """
 
     def __init__(self, app):
-        Document.__init__(self, app)
         self.force_date_format = None
+        Document.__init__(self, app)
+
 
     def _async_autosave(self):
         pass
@@ -1419,7 +1420,7 @@ class ImportDocument(Document):
         # vs the application date format, so this method was added
         # to override that default behavior in document.
         if self.force_date_format is None:
-            return Document._get_dateformat()
+            return Document._get_dateformat(self)
         else:
             return self.force_date_format
 
