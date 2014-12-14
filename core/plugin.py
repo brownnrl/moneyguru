@@ -238,6 +238,12 @@ class CurrencyProviderPlugin(Plugin):
         raise NotImplementedError()
 
 
+class ImportBindPlugin(Plugin):
+
+    def match_entries(self, document, import_document, existing_entries, imported_entries):
+        return []
+
+
 class ImportActionPlugin(Plugin, Broadcaster):
     """
     Plugin allowing certain kinds of actions to be performed on import.
