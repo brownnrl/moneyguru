@@ -174,6 +174,7 @@ class SwapMonthYear(BaseSwapDateFields):
 class ReferenceBind(ImportBindPlugin):
 
     def match_entries(self,
+                      target_account,
                       document,
                       import_document,
                       existing_entries,
@@ -209,7 +210,7 @@ class EquivalenceBind(ImportBindPlugin):
             for index, import_split in enumerate(import_splits):
                 existing_split = existing_splits[index]
 
-                if (existing_split.account is None) != (import_split is None):
+                if (existing_split.account is None) != (import_split.account is None):
                     return False
 
                 if import_split.amount.value != existing_split.amount.value or \
@@ -218,28 +219,52 @@ class EquivalenceBind(ImportBindPlugin):
 
         return True
 
-    def match_entries(self, document, import_document, existing_entries, imported_entries):
+    def match_entries(self, target_account, document, import_document, existing_entries, imported_entries):
 
         matches = []
         for import_entry in imported_entries:
-            import_transaction = import_entry.transaction
+
+            confidence = 0.9
+
             for existing_entry in existing_entries:
-                existing_transaction = existing_entry.transaction
-                if existing_transaction.description != import_transaction.description:
+
+                # We can not bind automatically if there is an impact on the
+                # date, target account, or amount
+
+                if existing_entry.amount.value != import_entry.amount.value:
                     continue
-                if existing_transaction.payee != import_transaction.payee:
+                if existing_entry.date != import_entry.date:
                     continue
-                if existing_transaction.checkno != existing_transaction.checkno:
+                if existing_entry.account.name.lower() != target_account.name.lower():
                     continue
-                if existing_transaction.amount.value != import_transaction.amount.value:
-                    continue
-                if existing_transaction.date != import_transaction.date:
-                    continue
-                splits_equal = self._splits_equal(existing_transaction.splits,
-                                                  import_transaction.splits)
+
+                splits_equal = len(existing_entry.transaction.splits) == len(import_entry.transaction.splits) and\
+                    existing_entry.transaction.amount.value == import_entry.transaction.amount.value
+
                 if not splits_equal:
                     continue
-                matches.append((existing_entry, import_entry, 0.95))
+
+                # Is there another existing entry on the same attributes as above?
+                if len([e for e in existing_entries if
+                        e.date == existing_entry.date and
+                        e.amount.value == existing_entry.amount.value and
+                        e.account.name.lower() == existing_entry.account.name.lower()]) > 1:
+                    confidence -= 0.2
+
+                if existing_entry.description != import_entry.description:
+                    confidence -= 0.1
+                if existing_entry.payee != import_entry.payee:
+                    confidence -= 0.1
+                if existing_entry.checkno != import_entry.checkno:
+                    confidence -= 0.1
+
+
+                if confidence == 0.9:
+                    # Nothing has changed about this entry, there isn't another duplicate
+                    # already, so we are pretty confident that it's the same transaction.
+                    import_entry.will_import = False
+                matches.append((existing_entry, import_entry, confidence))
+                break
         return matches
 
 EntryProbability = namedtuple('EntryProbability', 'existing imported probability')
@@ -269,34 +294,22 @@ class AccountPane:
 
     def _determine_best_matches(self, matches):
 
+        def check_better(entry, probability):
+            conflict = self._match_entries.get(entry, None)
+            if conflict and conflict.probability < probability:
+                self._remove_match(conflict)
+
         # Take existing entry that is recommended to be mapped to an import entry
         for existing_entry, imported_entry, probability in matches:
-            import_conflict = None
-            existing_conflict = None
-            if existing_entry in self._match_entries and \
-                self._match_entries[existing_entry].imported != imported_entry:
-                import_conflict = self._match_entries[existing_entry]
+            check_better(existing_entry, probability)
+            check_better(imported_entry, probability)
 
-            if imported_entry in self._match_entries and \
-                self._match_entries[imported_entry].existing != existing_entry:
-                existing_conflict = self._match_entries[imported_entry]
-
-            new_match = EntryProbability(existing_entry, imported_entry, probability)
-            add_match = False
-            if import_conflict and \
-                existing_conflict and \
-                import_conflict.probability < probability and \
-                existing_conflict.probability < probability:
-                add_match = True
-            elif import_conflict and import_conflict.probability < probability:
-                self._remove_match(import_conflict)
-                add_match = True
-            elif existing_conflict and existing_conflict.probability < probability:
-                self._remove_match(existing_conflict)
-
-            if add_match:
+            if (existing_entry not in self._match_entries and
+                imported_entry not in self._match_entries):
+                new_match = EntryProbability(existing_entry, imported_entry, probability)
                 self._match_entries[existing_entry] = new_match
                 self._match_entries[imported_entry] = new_match
+
 
     def _convert_matches(self, import_entries, existing_entries):
 
@@ -309,6 +322,8 @@ class AccountPane:
                 return
             elif not is_import and entry.reconciled:
                 processed.add(entry)
+                if match_entry:
+                    match_entry.imported.will_import = False
             elif match_entry:
                 self.matches.append([match_entry.existing, match_entry.imported])
                 processed.add(match_entry.existing)
@@ -335,7 +350,8 @@ class AccountPane:
         self.matches = []
 
         for plugin in self.bind_plugins:
-            matches = plugin.match_entries(None,
+            matches = plugin.match_entries(self.selected_target,
+                                           None,
                                            self.import_document,
                                            existing_entries,
                                            import_entries)
@@ -565,7 +581,7 @@ class ImportWindow(MainWindowGUIObject):
         if not hasattr(self.mainwindow, 'loader'):
             return
 
-        # self.import_document.force_date_format = parsing_date_format
+        self.import_document.clear()
 
         self.refresh_targets()
         accounts = [a for a in self.mainwindow.loader.accounts if a.is_balance_sheet_account() and a.entries]

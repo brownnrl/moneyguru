@@ -240,7 +240,7 @@ class CurrencyProviderPlugin(Plugin):
 
 class ImportBindPlugin(Plugin):
 
-    def match_entries(self, document, import_document, existing_entries, imported_entries):
+    def match_entries(self, target_account, document, import_document, existing_entries, imported_entries):
         return []
 
 
