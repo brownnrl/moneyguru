@@ -12,6 +12,7 @@ from collections import namedtuple
 from PyQt4.QtCore import QRect, QSize
 from PyQt4.QtGui import QStyledItemDelegate, QStyleOptionViewItemV4, QStyle
 
+# onClickCallable has the signature f(clicked_row_index: int).
 ItemDecoration = namedtuple('ItemDecoration', 'pixmap onClickCallable')
 
 class ItemDelegate(QStyledItemDelegate):
@@ -51,7 +52,7 @@ class ItemDelegate(QStyledItemDelegate):
 
         """
         return None
-    
+
     def _prepare_paint_options(self, option, index):
         # Don't set option directly in `paint` but here. This way, there won't be any trouble with
         # option being overwritten.
@@ -91,7 +92,7 @@ class ItemDelegate(QStyledItemDelegate):
         for dec in decorations:
             pixmap = dec.pixmap
             if pos.x() >= currentRight - pixmap.width():
-                dec.onClickCallable()
+                dec.onClickCallable(index)
                 return True
             currentRight -= pixmap.width()
         return False
@@ -119,15 +120,8 @@ class ItemDelegate(QStyledItemDelegate):
             option.decorationSize = QSize(decorationWidth, decorationHeight)
             option.features |= QStyleOptionViewItemV4.HasDecoration
         self._prepare_paint_options(option, index)
-        QStyledItemDelegate.paint(self, painter, option, index)
+
         xOffset = 0
-        for dec in decorations:
-            pixmap = dec.pixmap
-            x = option.rect.right() - pixmap.width() - xOffset
-            y = option.rect.center().y() - (pixmap.height() // 2)
-            rect = QRect(x, y, pixmap.width(), pixmap.height())
-            painter.drawPixmap(rect, pixmap)
-            xOffset += pixmap.width()
         # First added for #15, the painting of custom amount information.  This can
         # be used as a pattern for painting any column of information.
         value_painter = self._get_value_painter(index)
@@ -137,7 +131,17 @@ class ItemDelegate(QStyledItemDelegate):
             rect = QRect(rect.left(), rect.top(), rect.width() - xOffset, rect.height())
             value_option.rect = rect
             value_painter.paint(painter, value_option, index)
-    
+        else:
+            QStyledItemDelegate.paint(self, painter, option, index)
+
+        for dec in decorations:
+            pixmap = dec.pixmap
+            x = option.rect.right() - pixmap.width() - xOffset
+            y = option.rect.center().y() - (pixmap.height() // 2)
+            rect = QRect(x, y, pixmap.width(), pixmap.height())
+            painter.drawPixmap(rect, pixmap)
+            xOffset += pixmap.width()
+
     def setModelData(self, editor, model, index):
         # This call below is to give a chance to the editor to tweak its content a little bit before
         # we send it to the model.
