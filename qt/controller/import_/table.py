@@ -10,23 +10,30 @@ from PyQt4.QtCore import Qt, QMimeData, QByteArray
 from PyQt4.QtGui import QPixmap
 
 from qtlib.column import Column
-from ..table import Table
+from ..table import (Table,
+                     DATE_EDIT,
+                     NO_EDIT,
+                     DESCRIPTION_EDIT,
+                     PAYEE_EDIT,
+                     ACCOUNT_EDIT,
+                     CHANGED_PAINTER,
+                     AMOUNT_CHANGED_PAINTER)
 
 MIME_INDEXES = 'application/moneyguru.rowindexes'
 
 class ImportTable(Table):
     COLUMNS = [
-        Column('will_import', 20),
+        Column('will_import', 20, editor=NO_EDIT),
         Column('date', 80),
         Column('description', 90),
         Column('amount', 90, alignment=Qt.AlignRight),
         Column('bound', 22),
-        Column('date_import', 80),
-        Column('description_import', 90),
-        Column('payee_import', 90),
-        Column('checkno_import', 57),
-        Column('transfer_import', 90),
-        Column('amount_import', 90, alignment=Qt.AlignRight),
+        Column('date_import', 80, editor=DATE_EDIT, painter=CHANGED_PAINTER),
+        Column('description_import', 90, editor=DESCRIPTION_EDIT, painter=CHANGED_PAINTER),
+        Column('payee_import', 90, editor=PAYEE_EDIT, painter=CHANGED_PAINTER),
+        Column('checkno_import', 57, painter=CHANGED_PAINTER),
+        Column('transfer_import', 90, editor=ACCOUNT_EDIT, painter=CHANGED_PAINTER),
+        Column('amount_import', 90, alignment=Qt.AlignRight, painter=AMOUNT_CHANGED_PAINTER),
     ]
         
     def __init__(self, model, view):

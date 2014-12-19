@@ -23,11 +23,52 @@ CURR_VALUE_RE = re.compile(r"([^\d]{3} )?(.*)")
 # Simple named tuple to separate the currency from the value
 DisplayAmount = namedtuple('DisplayAmount', 'currency value')
 
-class AmountPainter:
+class Painter:
 
-    def __init__(self, attr_name, model):
+    def __init__(self, attr_name, model, call_super=False):
         self._attr_name = attr_name
         self._model = model
+        self.call_super=call_super
+
+
+    # private functions
+    def _getDataFromIndex(self, index):
+        """Retrieves model data.
+
+        Retrieves the data from the model.
+
+        Args:
+            index - QModelIndex in the model
+
+        Returns:
+            getattr of the model by index and column name.
+        """
+        if not index.isValid():
+            return None
+        column = self._model.columns.column_by_index(index.column())
+        if column.name != self._attr_name:
+            return None
+        return getattr(self._model[index.row()], column.name)
+
+
+    def sizeHint(self, option, index):
+        """sizeHint returns a QSize of the required size to draw the value.
+
+        Args:
+            option - QStyleOptionViewItemV4 normally as passed to a paint event
+            index - QModelIndex in the model
+
+        Returns:
+            QSize of the required size to draw the value.
+        """
+        value = self._getDataFromIndex(index)
+        if value is None:
+            return None
+        option = QStyleOptionViewItemV4(option)
+        return QSize(option.fontMetrics.width(), option.fontMetrics.height())
+
+
+class AmountPainter(Painter):
 
     # private functions
     def _getDataFromIndex(self, index):
@@ -50,12 +91,7 @@ class AmountPainter:
 
             "MXN 432 321,01" -> DisplayAmount("MXN", "432 321,01")
         """
-        if not index.isValid():
-            return None
-        column = self._model.columns.column_by_index(index.column())
-        if column.name != self._attr_name:
-            return None
-        amount = getattr(self._model[index.row()], column.name)
+        amount = Painter._getDataFromIndex(self, index)
 
         amount = CURR_VALUE_RE.match(amount)
 
@@ -154,3 +190,16 @@ class AmountPainter:
                                 font_height),
                          column_data.value,
                          QTextOption(Qt.AlignVCenter))
+
+class ChangedPainter(Painter):
+
+    def __init__(self, *args, **kwargs):
+        Painter.__init__(*args, **kwargs)
+        if 'call_super' not in kwargs or len(args) < 3:
+            self.call_super = True
+
+    def paint(self, painter, option, index):
+        painter.fillRect(option.rect(), Qt.yellow)
+
+AmountChangedPainter = AmountPainter
+

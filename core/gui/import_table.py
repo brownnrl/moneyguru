@@ -9,6 +9,7 @@
 from hscommon.trans import trget
 from hscommon.gui.column import Column
 from .table import GUITable, Row
+from .completable_edit import CompletableEdit
 
 trcol = trget('columns')
 
@@ -32,6 +33,8 @@ class ImportTable(GUITable):
         GUITable.__init__(self, document=import_window.document)
         self.window = import_window
         self._is_two_sided = False
+        self.completable_edit = CompletableEdit(self.window.mainwindow)
+
     
     #--- Override
     def _fill(self):
@@ -80,7 +83,17 @@ class ImportTable(GUITable):
         """Returns whether the table should show columns to display matches from the target account.
         """
         return self._is_two_sided
-    
+
+
+def _setter_guard(func):
+
+    def guard(self, **kwargs):
+        if self.table.pane is None:
+            return
+        return func(self, **kwargs)
+
+    return guard
+
 
 class ImportTableRow(Row):
     def __init__(self, table, entry, imported):
@@ -102,6 +115,8 @@ class ImportTableRow(Row):
     def can_edit_cell(self, column_name):
         if column_name == 'will_import':
             return Row.can_edit_cell(self, column_name)
+        elif column_name.endswith('import'):
+            return True
         else:
             return False
     
@@ -139,27 +154,65 @@ class ImportTableRow(Row):
     @property
     def date_import(self):
         return self.table.document.app.format_date(self._date_import) if self._date_import else ''
+
+    @_setter_guard
+    def _change_entry(self, **kwargs):
+        self.table.pane.import_document.change_entry(self.imported, **kwargs)
+        self.table.pane.import_document.cook()
+        self.table.pane.match_entries()
+        self.table.refresh()
+
+    @date_import.setter
+    def date_import(self, value):
+        value = self.table.document.app.parse_date(value)
+        self._change_entry(date=value)
     
     @property
     def description_import(self):
         return self._description_import
+
+    @description_import.setter
+    def description_import(self, value):
+        self._change_entry(description=value)
     
     @property
     def payee_import(self):
         return self._payee_import
+
+    @payee_import.setter
+    def payee_import(self, value):
+        self._change_entry(payee=value)
     
     @property
     def checkno_import(self):
         return self._checkno_import
+
+    @checkno_import.setter
+    def checkno_import(self, value):
+        self._change_entry(checkno=value)
     
     @property
     def transfer_import(self):
         return self._transfer_import
-    
+
+    @transfer_import.setter
+    def transfer_import(self, value):
+        self._change_entry(transfer=value)
+
     @property
     def amount_import(self):
         return self.table.document.format_amount(self._amount_import)
-    
+
+    @amount_import.setter
+    def amount_import(self, value):
+        try:
+            currency = self.imported.account.currency
+            parsed = self.table.document.parse_amount(value, default_currency=currency)
+        except ValueError:
+            return
+        if parsed != self._amount_import:
+            self._change_entry(amount=parsed)
+
     @property
     def can_edit_will_import(self):
         return self.imported is not None
@@ -172,4 +225,4 @@ class ImportTableRow(Row):
     def will_import(self, value):
         if self.imported is not None:
             self.imported.will_import = value
-    
+

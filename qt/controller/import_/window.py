@@ -61,7 +61,6 @@ class ImportWindow(QWidget):
         self.targetAccountLayout.addWidget(self.groupBox)
         self.verticalLayout.addLayout(self.targetAccountLayout)
         self.tableView = TableView(self)
-        self.tableView.setEditTriggers(QtGui.QAbstractItemView.NoEditTriggers)
         self.tableView.setDragEnabled(True)
         self.tableView.setDragDropMode(QtGui.QAbstractItemView.InternalMove)
         self.tableView.setSelectionMode(QtGui.QAbstractItemView.ExtendedSelection)
