@@ -157,6 +157,10 @@ class ImportTableRow(Row):
 
     @_setter_guard
     def _change_entry(self, **kwargs):
+        t = transaction = self.imported.transaction
+        if not hasattr(transaction, 'attrs_changed'):
+            self.imported.transaction.attrs_changed = set()
+        transaction.attrs_changed = t.attrs_changed.union([k + '_import' for k in kwargs.keys()])
         self.table.pane.import_document.change_entry(self.imported, **kwargs)
         self.table.pane.import_document.cook()
         self.table.pane.match_entries()

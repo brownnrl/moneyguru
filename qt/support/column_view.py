@@ -11,7 +11,12 @@ __author__ = 'nelson'
 from collections import namedtuple
 
 from PyQt4.QtCore import QRectF, QSize, Qt
-from PyQt4.QtGui import QStyleOptionViewItemV4, QStyle, QTextOption
+from PyQt4.QtGui import (QStyleOptionViewItemV4,
+                         QStyle,
+                         QTextOption,
+                         QBrush,
+                         QFont,
+                         QFontMetrics)
 
 import re
 import logging
@@ -28,10 +33,10 @@ class Painter:
     def __init__(self, attr_name, model, call_super=False):
         self._attr_name = attr_name
         self._model = model
-        self.call_super=call_super
+        self.call_super = call_super
 
 
-    # private functions
+    # virtual
     def _getDataFromIndex(self, index):
         """Retrieves model data.
 
@@ -48,7 +53,10 @@ class Painter:
         column = self._model.columns.column_by_index(index.column())
         if column.name != self._attr_name:
             return None
-        return getattr(self._model[index.row()], column.name)
+        return self._model[index.row()], column
+
+    def _is_selected(self, option):
+        return bool(option.state & QStyle.State_Selected)
 
 
     def sizeHint(self, option, index):
@@ -61,11 +69,12 @@ class Painter:
         Returns:
             QSize of the required size to draw the value.
         """
-        value = self._getDataFromIndex(index)
+        value, column = self._getDataFromIndex(index)
         if value is None:
             return None
         option = QStyleOptionViewItemV4(option)
-        return QSize(option.fontMetrics.width(), option.fontMetrics.height())
+        value = getattr(value, column.name)
+        return QSize(option.fontMetrics.width(value), option.fontMetrics.height())
 
 
 class AmountPainter(Painter):
@@ -91,7 +100,9 @@ class AmountPainter(Painter):
 
             "MXN 432 321,01" -> DisplayAmount("MXN", "432 321,01")
         """
-        amount = Painter._getDataFromIndex(self, index)
+        amount, column = Painter._getDataFromIndex(self, index)
+
+        amount = getattr(amount, column.name)
 
         amount = CURR_VALUE_RE.match(amount)
 
@@ -125,10 +136,18 @@ class AmountPainter(Painter):
         do_paint_currency = amount.currency != ""
         # Use the currently formatted string just remove the currency information
         # for separate painting.
-        cur_width = option.fontMetrics.width(amount.currency) \
+        font_metrics = QFontMetrics(option.font)
+        cur_width = font_metrics.width(amount.currency) \
             if do_paint_currency \
-            else option.fontMetrics.width("XXX")
-        val_width = option.fontMetrics.width(amount.value)
+            else font_metrics.width("XXX")
+        val_width = font_metrics.width(amount.value)
+
+        if option.font.italic():
+            if do_paint_currency:
+                cur_width += (font_metrics.leftBearing(amount.currency[0]) +
+                              font_metrics.leftBearing(amount.currency[-1]))
+            val_width += (font_metrics.leftBearing(amount.value[0]) +
+                          font_metrics.leftBearing(amount.value[-1]))
 
         return cur_width, val_width
 
@@ -170,36 +189,80 @@ class AmountPainter(Painter):
         painter.setFont(option.font)
         cur_width, val_width = self._getAmountTextWidths(column_data, option)
         font_height = option.fontMetrics.height()
-        do_paint_currency = cur_width > 0
-        is_selected = bool(option.state & QStyle.State_Selected)
+        do_paint_currency = cur_width > 0 and column_data.currency
+        is_selected = self._is_selected(option)
         is_active = bool(option.state & QStyle.State_Active)
         if is_selected and is_active:
             painter.setPen(Qt.white)
         else:
             painter.setPen(Qt.black)
+
+        font_metrics = QFontMetrics(option.font)
+
+        def adjusted_rect(text, text_rect):
+            left_bearing = font_metrics.leftBearing(text[0])
+            right_bearing = font_metrics.leftBearing(text[-1])
+            return text_rect.adjusted(-left_bearing, 0, right_bearing, 0)
+
         if do_paint_currency:
-            painter.drawText(QRectF(4+option.rect.left(),
-                                    option.rect.top(),
-                                    cur_width,
-                                    font_height),
+            text_rect = QRectF(4+option.rect.left(),
+                               option.rect.top(),
+                               cur_width,
+                               font_height)
+            # http://stackoverflow.com/questions/23737591/qpainter-drawtext-italic-writes-outside-of-the-rectangle
+            if option.font.italic():
+                text_rect = adjusted_rect(column_data.currency, text_rect)
+
+            painter.drawText(text_rect,
                              column_data.currency,
                              QTextOption(Qt.AlignVCenter))
-        painter.drawText(QRectF(option.rect.right() - val_width - 5,
-                                option.rect.top(),
-                                val_width,
-                                font_height),
+        text_rect = QRectF(option.rect.right() - val_width - 5,
+                           option.rect.top(),
+                           val_width,
+                           font_height)
+
+        if option.font.italic():
+            text_rect = adjusted_rect(column_data.value, text_rect)
+
+        painter.drawText(text_rect,
                          column_data.value,
                          QTextOption(Qt.AlignVCenter))
 
+
 class ChangedPainter(Painter):
 
-    def __init__(self, *args, **kwargs):
-        Painter.__init__(*args, **kwargs)
-        if 'call_super' not in kwargs or len(args) < 3:
-            self.call_super = True
+    def __init__(self, attr_name, model, call_super=True):
+        Painter.__init__(self, attr_name, model, call_super)
 
     def paint(self, painter, option, index):
-        painter.fillRect(option.rect(), Qt.yellow)
+        data, column = self._getDataFromIndex(index)
 
-AmountChangedPainter = AmountPainter
+        if not hasattr(data, 'imported') or data.imported is None:
+            return
+
+        data = data.imported.transaction
+
+        if (hasattr(data, 'attrs_changed') and
+           self._attr_name in data.attrs_changed):
+            option.font.setWeight(QFont.Bold)
+            option.font.setItalic(True)
+            if not self._is_selected(option):
+                painter.fillRect(option.rect, Qt.yellow)
+
+
+class AmountChangedPainter(Painter):
+
+    def __init__(self, *args, **kwargs):
+        Painter.__init__(self, *args, **kwargs)
+        self.call_super = False
+        self._changed_painter = ChangedPainter(self._attr_name, self._model)
+        self._amount_painter = AmountPainter(self._attr_name, self._model)
+
+    def sizeHint(self, option, index):
+        return self._amount_painter.sizeHint(option, index)
+
+    def paint(self, painter, option, index):
+        self._changed_painter.paint(painter, option, index)
+
+        self._amount_painter.paint(painter, option, index)
 

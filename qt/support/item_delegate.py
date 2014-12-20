@@ -126,12 +126,14 @@ class ItemDelegate(QStyledItemDelegate):
         # be used as a pattern for painting any column of information.
         value_painter = self._get_value_painter(index)
         if value_painter is not None:
-            value_option = QStyleOptionViewItemV4(option)
-            rect = value_option.rect
-            rect = QRect(rect.left(), rect.top(), rect.width() - xOffset, rect.height())
-            value_option.rect = rect
-            value_painter.paint(painter, value_option, index)
-        else:
+            old_rect = QRect(option.rect)
+            rect = option.rect
+            option.rect = QRect(rect.left(), rect.top(), rect.width() - xOffset, rect.height())
+            option.rect = rect
+            value_painter.paint(painter, option, index)
+            option.rect = old_rect
+
+        if value_painter is None or value_painter.call_super:
             QStyledItemDelegate.paint(self, painter, option, index)
 
         for dec in decorations:

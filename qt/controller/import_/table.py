@@ -33,7 +33,7 @@ class ImportTable(Table):
         Column('payee_import', 90, editor=PAYEE_EDIT, painter=CHANGED_PAINTER),
         Column('checkno_import', 57, painter=CHANGED_PAINTER),
         Column('transfer_import', 90, editor=ACCOUNT_EDIT, painter=CHANGED_PAINTER),
-        Column('amount_import', 90, alignment=Qt.AlignRight, painter=AMOUNT_CHANGED_PAINTER),
+        Column('amount_import', 90, alignment=Qt.AlignRight, painter=AMOUNT_CHANGED_PAINTER, resizeToFit=True),
     ]
         
     def __init__(self, model, view):
