@@ -231,7 +231,7 @@ class EquivalenceBind(ImportBindPlugin):
                 # We can not bind automatically if there is an impact on the
                 # date, target account, or amount
 
-                if existing_entry.amount.value != import_entry.amount.value:
+                if existing_entry.amount != import_entry.amount:
                     continue
                 if existing_entry.date != import_entry.date:
                     continue
@@ -258,7 +258,6 @@ class EquivalenceBind(ImportBindPlugin):
                 if existing_entry.checkno != import_entry.checkno:
                     confidence -= 0.1
 
-
                 if confidence == 0.9:
                     # Nothing has changed about this entry, there isn't another duplicate
                     # already, so we are pretty confident that it's the same transaction.
@@ -283,6 +282,7 @@ class AccountPane:
         self.max_month = 12
         self.max_year = 99 # 2 digits
         self._match_entries = dict()
+        self._user_binds = dict()  # tracks binds / unbinds as indicated by the user.
         self._match_probabilties = dict()
         self.match_entries()
 
@@ -316,27 +316,54 @@ class AccountPane:
         processed = set()
 
         def append_entry(entry, is_import):
-            match_entry = self._match_entries.get(entry, None)
 
             if entry in processed:
                 return
-            elif not is_import and entry.reconciled:
-                processed.add(entry)
-                if match_entry:
-                    match_entry.imported.will_import = False
-            elif match_entry:
+
+            match_entry = self._match_entries.get(entry, None)
+
+            if (match_entry and
+                  match_entry.existing not in processed and
+                  match_entry.imported not in processed):
                 self.matches.append([match_entry.existing, match_entry.imported])
                 processed.add(match_entry.existing)
                 processed.add(match_entry.imported)
-            else:
-                self.matches.append([None, entry] if is_import else [entry, None])
+
+                if match_entry.existing.reconciled:
+                    match_entry.imported.will_import = False
+            elif is_import:
+                self.matches.append([None, entry])
                 processed.add(entry)
+            else:
+                processed.add(entry)
+
+        for (existing_entry, import_split), bound in self._user_binds.items():
+            if bound:
+                [import_entry] = [e for e in import_entries if e.split is import_split]
+                self.matches.append([existing_entry, import_entry])
+                processed.add(existing_entry)
+                processed.add(import_entry)
 
         for existing_entry in existing_entries:
             append_entry(existing_entry, False)
 
         for import_entry in import_entries:
             append_entry(import_entry, True)
+
+        for (existing_entry, import_split), bound in self._user_binds.items():
+            if not bound:
+                match = [[e, i] for [e, i] in self.matches if
+                         e and i and
+                         (e, i.split) == (existing_entry, import_split)]
+                if match:
+                    [[e, i]] = match
+                    self.matches.remove([e, i])
+                else:
+                    continue
+                if not e.reconciled:
+                    self.matches.append([e, None])
+                self.matches.append([None, i])
+
 
     def match_entries(self):
         self.account = self.import_document.accounts.find(self.name)
@@ -362,19 +389,15 @@ class AccountPane:
         self._sort_matches()
 
     def _sort_matches(self):
-        self.matches.sort(key=lambda t: t[0].date if t[0] is not None else t[1].date)
+        self.matches.sort(key=lambda t: (t[0].date if t[0] is not None else t[1].date, t[0] is None))
 
     def bind(self, existing, imported):
-        [match1] = [m for m in self.matches if m[0] is existing]
-        [match2] = [m for m in self.matches if m[1] is imported]
-        match1[1] = match2[1]
-        self.matches.remove(match2)
+        self._user_binds[(existing, imported.split)] = True  # Bind
+        self.match_entries()
 
     def unbind(self, existing, imported):
-        [match] = [m for m in self.matches if m[0] is existing and m[1] is imported]
-        match[1] = None
-        self.matches.append([None, imported])
-        self._sort_matches()
+        self._user_binds[(existing, imported.split)] = False  # Unbind
+        self.match_entries()
 
     @property
     def selected_target(self):

@@ -115,7 +115,7 @@ class ImportTableRow(Row):
     def can_edit_cell(self, column_name):
         if column_name == 'will_import':
             return Row.can_edit_cell(self, column_name)
-        elif column_name.endswith('import'):
+        elif column_name.endswith('import') and self.imported:
             return True
         else:
             return False
