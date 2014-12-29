@@ -16,6 +16,11 @@ from PyQt4.QtGui import QStyledItemDelegate, QStyleOptionViewItemV4, QStyle
 ItemDecoration = namedtuple('ItemDecoration', 'pixmap onClickCallable')
 
 class ItemDelegate(QStyledItemDelegate):
+
+    def __init__(self, *args, **kwargs):
+        QStyledItemDelegate.__init__(self, *args, **kwargs)
+        self._display_text = True
+
     #--- Virtual
     def _get_decorations(self, index, isSelected):
         """Returns a list of ItemDecorations which are drawn during the paint event.
@@ -59,6 +64,11 @@ class ItemDelegate(QStyledItemDelegate):
         pass
 
     #--- Overrides
+
+    def displayText(self, p_object, locale):
+        if self._display_text:
+            return QStyledItemDelegate.displayText(self, p_object, locale)
+        return ""
 
     def sizeHint(self, option, index):
         """Returns a QSize bounding box of the area required to paint the data in the model at the index.
@@ -124,7 +134,14 @@ class ItemDelegate(QStyledItemDelegate):
         xOffset = 0
         # First added for #15, the painting of custom amount information.  This can
         # be used as a pattern for painting any column of information.
+        painter.save()
         value_painter = self._get_value_painter(index)
+        if value_painter:
+            value_painter.pre_paint(painter, option, index)
+            self._display_text = not value_painter.paints_text
+        else:
+            self._display_text = True
+        QStyledItemDelegate.paint(self, painter, option, index)
         if value_painter is not None:
             old_rect = QRect(option.rect)
             rect = option.rect
@@ -133,9 +150,6 @@ class ItemDelegate(QStyledItemDelegate):
             value_painter.paint(painter, option, index)
             option.rect = old_rect
 
-        if value_painter is None or value_painter.call_super:
-            QStyledItemDelegate.paint(self, painter, option, index)
-
         for dec in decorations:
             pixmap = dec.pixmap
             x = option.rect.right() - pixmap.width() - xOffset
@@ -143,6 +157,8 @@ class ItemDelegate(QStyledItemDelegate):
             rect = QRect(x, y, pixmap.width(), pixmap.height())
             painter.drawPixmap(rect, pixmap)
             xOffset += pixmap.width()
+
+        painter.restore()
 
     def setModelData(self, editor, model, index):
         # This call below is to give a chance to the editor to tweak its content a little bit before

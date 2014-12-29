@@ -27,7 +27,7 @@ deps
 /help/*/changelog.rst
 /help/*/credits.rst
 /help/*/image
-
+/.idea
 # ctags
 tags
 
