@@ -9,8 +9,8 @@
 
 from collections import namedtuple
 
-from PyQt4.QtCore import QRect, QSize
-from PyQt4.QtGui import QStyledItemDelegate, QStyleOptionViewItemV4, QStyle
+from PyQt4.QtCore import QRect, QSize, QEvent, Qt
+from PyQt4.QtGui import QStyledItemDelegate, QStyleOptionViewItemV4, QStyle, QToolTip
 
 # onClickCallable has the signature f(clicked_row_index: int).
 ItemDecoration = namedtuple('ItemDecoration', 'pixmap onClickCallable')

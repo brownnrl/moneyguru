@@ -10,10 +10,11 @@ from hscommon.trans import trget
 from hscommon.gui.column import Column
 from .table import GUITable, Row
 from .completable_edit import CompletableEdit
+from .transaction_table_base import TransactionSelectionMixin
 
 trcol = trget('columns')
 
-class ImportTable(GUITable):
+class ImportTable(GUITable, TransactionSelectionMixin):
     SAVENAME = 'ImportTable'
     COLUMNS = [
         Column('will_import', display=''),
@@ -35,8 +36,27 @@ class ImportTable(GUITable):
         self._is_two_sided = False
         self.completable_edit = CompletableEdit(self.window.mainwindow)
 
-    
     #--- Override
+    def select_transactions(self, transactions):
+        selected_indexes = []
+        for index, row in enumerate(self):
+            indexed_row = row.imported if row.imported else row.entry
+            if indexed_row in transactions:
+                selected_indexes.append(index)
+        self.selected_indexes = selected_indexes
+
+    @property
+    def _explicitly_selected_transactions(self):
+        return self.selected_transactions
+
+    @property
+    def selected_transactions(self):
+        return [row.imported.transaction if row.imported
+                else row.entry.transaction for row in self.selected_rows]
+
+    def _update_selection(self):
+        print("I am called.")
+
     def _fill(self):
         self._is_two_sided = False
         self.pane = self.window.selected_pane
@@ -46,6 +66,7 @@ class ImportTable(GUITable):
             if existing is not None:
                 self._is_two_sided = True
             self.append(ImportTableRow(self, existing, imported))
+        self._restore_from_explicit_selection()
     
     #--- Public
     def bind(self, source_index, dest_index):
@@ -158,9 +179,14 @@ class ImportTableRow(Row):
     @_setter_guard
     def _change_entry(self, **kwargs):
         t = transaction = self.imported.transaction
-        if not hasattr(transaction, 'attrs_changed'):
-            self.imported.transaction.attrs_changed = set()
-        transaction.attrs_changed = t.attrs_changed.union([k + '_import' for k in kwargs.keys()])
+        if not hasattr(t, 'attrs_changed'):
+            t.attrs_changed = set()
+            t.attrs_original = dict()
+        for k, v in kwargs.items():
+            if k not in t.attrs_changed:
+                t.attrs_original[k + '_import'] = getattr(self.imported, k)
+            if getattr(self.imported, k) != v:
+                t.attrs_changed.add(k + '_import')
         self.table.pane.import_document.change_entry(self.imported, **kwargs)
         self.table.pane.import_document.cook()
         self.table.pane.match_entries()

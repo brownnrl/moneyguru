@@ -53,6 +53,12 @@ class ImportTable(Table):
                 return QPixmap(':/lock_12') if row.bound else None
             else:
                 return None
+        elif (role == Qt.ToolTipRole and
+                  column.name.endswith('import') and
+                  row.imported and
+                  hasattr(row.imported.transaction, 'attrs_original') and
+                  column.name in row.imported.transaction.attrs_original):
+            return "Original Value: " + str(row.imported.transaction.attrs_original[column.name])
         else:
             return Table._getData(self, row, column, role)
     
