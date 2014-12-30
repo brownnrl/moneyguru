@@ -35,19 +35,16 @@ class ImportTable(GUITable, TransactionSelectionMixin):
         self.window = import_window
         self._is_two_sided = False
         self.completable_edit = CompletableEdit(self.window.mainwindow)
+        self._explicitly_selected_transactions = []
 
     #--- Override
     def select_transactions(self, transactions):
         selected_indexes = []
         for index, row in enumerate(self):
-            indexed_row = row.imported if row.imported else row.entry
+            indexed_row = row.imported.transaction if row.imported else row.entry.transaction
             if indexed_row in transactions:
                 selected_indexes.append(index)
         self.selected_indexes = selected_indexes
-
-    @property
-    def _explicitly_selected_transactions(self):
-        return self.selected_transactions
 
     @property
     def selected_transactions(self):
@@ -55,7 +52,7 @@ class ImportTable(GUITable, TransactionSelectionMixin):
                 else row.entry.transaction for row in self.selected_rows]
 
     def _update_selection(self):
-        print("I am called.")
+        self._explicitly_selected_transactions = self.selected_transactions
 
     def _fill(self):
         self._is_two_sided = False
@@ -190,7 +187,7 @@ class ImportTableRow(Row):
         self.table.pane.import_document.change_entry(self.imported, **kwargs)
         self.table.pane.import_document.cook()
         self.table.pane.match_entries()
-        self.table.refresh()
+        self.table.refresh_and_show_selection()
 
     @date_import.setter
     def date_import(self, value):
