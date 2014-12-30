@@ -139,7 +139,7 @@ class ImportTableRow(Row):
             return False
     
     def load(self):
-        self._date = self.entry.date if self.entry else None
+        self._entry_date = self.entry.date if self.entry else None
         self._description = self.entry.description if self.entry else ''
         self._amount = self.entry.amount if self.entry else None
         self._date_import = self.imported.date if self.imported else None
@@ -154,8 +154,13 @@ class ImportTableRow(Row):
     
     #--- Properties
     @property
+    def _date(self):
+        return self.imported.date if self.imported else self.entry.date
+
+
+    @property
     def date(self):
-        return self.table.document.app.format_date(self._date) if self._date else ''
+        return self.table.document.app.format_date(self._entry_date) if self._entry_date else ''
     
     @property
     def description(self):
