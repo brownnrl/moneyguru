@@ -585,6 +585,10 @@ class ImportWindow(MainWindowGUIObject):
             target_account = pane.account # pane.account == new account
         try:
             self.document.import_entries(target_account, pane.account, matches)
+            transactions = dedupe([entry.transaction for entry in pane.account.entries])
+            transactions = [txn for txn in transactions if txn in pane.import_document.transactions]
+            pane.import_document.delete_transactions(transactions)
+            pane.import_document.cook()
         except OperationAborted:
             pass
         else:
