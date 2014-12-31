@@ -423,7 +423,6 @@ class ImportWindow(MainWindowGUIObject):
 
     def __init__(self, mainwindow):
         MainWindowGUIObject.__init__(self, mainwindow)
-        self.import_document = ImportDocument(self.app)
         self._selected_pane_index = 0
         self._selected_target_index = 0
         self._import_action_plugins = [SwapDayMonth(),
@@ -475,7 +474,7 @@ class ImportWindow(MainWindowGUIObject):
         if panes:  # If there are no relevant panes, we shouldn't perform the action
             import_action.perform_action(self.selected_pane, panes, txns)
 
-        self.import_document.cook()
+        self.selected_pane.import_document.cook()
 
         for pane in panes:
             pane.match_entries()
@@ -610,12 +609,14 @@ class ImportWindow(MainWindowGUIObject):
         # loader account lists...
         # self.import_document.clear()
 
+        import_document = ImportDocument(self.app)
+
         self.refresh_targets()
         accounts = [a for a in self.mainwindow.loader.accounts if a.is_balance_sheet_account() and a.entries]
 
         parsing_date_format = DateFormat.from_sysformat(self.mainwindow.loader.parsing_date_format)
         for account in accounts:
-            self.import_document.import_entries(account, account, [[entry, None] for entry in account.entries[:]])
+            import_document.import_entries(account, account, [[entry, None] for entry in account.entries[:]])
             target_account = None
             if self.mainwindow.loader.target_account is not None:
                 target_account = self.mainwindow.loader.target_account
@@ -624,7 +625,7 @@ class ImportWindow(MainWindowGUIObject):
                     t for t in self.target_accounts if t.reference == account.reference
                 )
             self.panes.append(AccountPane(self._bind_plugins,
-                                          self.import_document,
+                                          import_document,
                                           account,
                                           target_account,
                                           parsing_date_format))
