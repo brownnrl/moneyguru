@@ -236,7 +236,7 @@ def app_import_checkbook_qif_with_existing_txns():
     app.mw.parse_file_for_import(testdata.filepath('qif/checkbook.qif'))
     app.clear_gui_calls()
     app.iwin.selected_target_account_index = 1 # foo
-    app.itable.view.check_gui_calls(['refresh'])
+    app.itable.view.check_gui_calls(['refresh', 'update_selection'])
     return app
 
 @with_app(app_import_checkbook_qif_with_existing_txns)

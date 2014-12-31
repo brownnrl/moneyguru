@@ -605,7 +605,10 @@ class ImportWindow(MainWindowGUIObject):
         if not hasattr(self.mainwindow, 'loader'):
             return
 
-        self.import_document.clear()
+        # there are ramifications here to think about in terms of expected behavior.
+        # old behavior is to store accounts without importing segregated by their respective
+        # loader account lists...
+        # self.import_document.clear()
 
         self.refresh_targets()
         accounts = [a for a in self.mainwindow.loader.accounts if a.is_balance_sheet_account() and a.entries]
