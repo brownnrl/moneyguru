@@ -333,9 +333,10 @@ class AccountPane:
                     match_entry.imported.will_import = False
             elif is_import:
                 self.matches.append([None, entry])
-                processed.add(entry)
-            else:
-                processed.add(entry)
+            elif not entry.reconciled:
+                self.matches.append([entry, None])
+
+            processed.add(entry)
 
         for (existing_entry, import_split), bound in self._user_binds.items():
             if bound:
