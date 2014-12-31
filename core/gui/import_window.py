@@ -367,6 +367,7 @@ class AccountPane:
 
 
     def match_entries(self):
+        self.import_document.cook()
         self.account = self.import_document.accounts.find(self.name)
         import_entries = self.account.entries[:]
         if self.selected_target is not None:
@@ -587,8 +588,9 @@ class ImportWindow(MainWindowGUIObject):
             self.document.import_entries(target_account, pane.account, matches)
             transactions = dedupe([entry.transaction for entry in pane.account.entries])
             transactions = [txn for txn in transactions if txn in pane.import_document.transactions]
-            pane.import_document.delete_transactions(transactions)
-            pane.import_document.cook()
+            for transaction in transactions:
+                pane.import_document.transactions.remove(transaction)
+            pane.import_document.accounts.remove(pane.account)
         except OperationAborted:
             pass
         else:
@@ -605,6 +607,9 @@ class ImportWindow(MainWindowGUIObject):
         self.target_accounts.sort(key=lambda a: a.name.lower())
 
     def refresh_panes(self):
+        for pane in self.panes:
+            pane.import_document.cook()
+
         if not hasattr(self.mainwindow, 'loader'):
             return
 
