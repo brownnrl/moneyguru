@@ -21,6 +21,7 @@ from .import_table import ImportTable
 
 from core.plugin import ImportActionPlugin, ImportBindPlugin
 from core.document import ImportDocument
+from core.model.account import Account
 from collections import namedtuple
 
 DAY = 'day'
@@ -579,18 +580,39 @@ class ImportWindow(MainWindowGUIObject):
         pane = self.selected_pane
         matches = pane.matches
         matches = [(e, ref) for ref, e in matches if e is not None and getattr(e, 'will_import', True)]
-        if pane.selected_target is not None:
-            # We import in an existing account, adjust all the transactions accordingly
-            target_account = pane.selected_target
-        else:
-            target_account = pane.account # pane.account == new account
+
+        name2account = pane.import_document.exported_accounts
+
+        def copy_account(acct):
+            if acct is None:
+                return None
+            if acct.name not in name2account:
+                copied_account = Account(acct.name, acct.currency, acct.type)
+                copied_account.reference = acct.reference
+                name2account[acct.name] = copied_account
+                return copied_account
+            else:
+                return name2account[acct.name]
+
         try:
-            self.document.import_entries(target_account, pane.account, matches)
-            transactions = dedupe([entry.transaction for entry in pane.account.entries])
-            transactions = [txn for txn in transactions if txn in pane.import_document.transactions]
-            for transaction in transactions:
-                pane.import_document.transactions.remove(transaction)
-            pane.import_document.accounts.remove(pane.account)
+            pane_account = copy_account(pane.account)
+
+            for (e, ref) in matches:
+                for split in e.transaction.splits:
+                    split.account = copy_account(split.account)
+                # TODO: can we import only one split from a transaction?
+                # Do we need to do this?
+                if e.transaction in pane.import_document.transactions:
+                    pane.import_document.transactions.remove(e.transaction)
+
+            if pane.selected_target is not None:
+                # We import in an existing account, adjust all the transactions accordingly
+                target_account = pane.selected_target
+            else:
+                target_account = pane_account # pane.account == new account
+
+            self.document.import_entries(target_account, pane_account, matches)
+
         except OperationAborted:
             pass
         else:
@@ -624,8 +646,13 @@ class ImportWindow(MainWindowGUIObject):
         accounts = [a for a in self.mainwindow.loader.accounts if a.is_balance_sheet_account() and a.entries]
 
         parsing_date_format = DateFormat.from_sysformat(self.mainwindow.loader.parsing_date_format)
+        import_document.accounts = self.mainwindow.loader.accounts
+        import_document.transactions = self.mainwindow.loader.transactions
+        import_document.schedules = self.mainwindow.loader.schedules
+        import_document.budgets = self.mainwindow.loader.budgets
+        import_document.oven = self.mainwindow.loader.oven
+        import_document.cook()
         for account in accounts:
-            import_document.import_entries(account, account, [[entry, None] for entry in account.entries[:]])
             target_account = None
             if self.mainwindow.loader.target_account is not None:
                 target_account = self.mainwindow.loader.target_account

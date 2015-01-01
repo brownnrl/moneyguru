@@ -1396,6 +1396,7 @@ class ImportDocument(Document):
 
     def __init__(self, app):
         self.force_date_format = None
+        self.exported_accounts = dict()
         Document.__init__(self, app)
 
 
