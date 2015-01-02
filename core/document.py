@@ -1397,6 +1397,7 @@ class ImportDocument(Document):
     def __init__(self, app):
         self.force_date_format = None
         self.exported_accounts = dict()
+        self.cached_transactions = dict()
         Document.__init__(self, app)
 
 
@@ -1451,7 +1452,7 @@ class ImportDocument(Document):
         to re-do it's account entries.
         """
         self.select_all_transactions_range()
-        self.oven.cook(from_date=self.date_range.start, until_date=self.date_range.end)
+        self.oven.cook(from_date=None, until_date=None)
 
     def _cook(self, from_date=None):
         pass

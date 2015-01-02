@@ -22,7 +22,9 @@ from .import_table import ImportTable
 from core.plugin import ImportActionPlugin, ImportBindPlugin
 from core.document import ImportDocument
 from core.model.account import Account
+from core.model.entry import Entry
 from collections import namedtuple
+from copy import copy
 
 DAY = 'day'
 MONTH = 'month'
@@ -368,7 +370,6 @@ class AccountPane:
 
 
     def match_entries(self):
-        self.import_document.cook()
         self.account = self.import_document.accounts.find(self.name)
         import_entries = self.account.entries[:]
         if self.selected_target is not None:
@@ -582,6 +583,7 @@ class ImportWindow(MainWindowGUIObject):
         matches = [(e, ref) for ref, e in matches if e is not None and getattr(e, 'will_import', True)]
 
         name2account = pane.import_document.exported_accounts
+        cached_txn = pane.import_document.cached_transactions
 
         def copy_account(acct):
             if acct is None:
@@ -594,16 +596,33 @@ class ImportWindow(MainWindowGUIObject):
             else:
                 return name2account[acct.name]
 
+        def copy_transaction(txn):
+            if txn not in cached_txn:
+                new_txn = txn.replicate()
+                cached_txn[txn] = new_txn
+                return new_txn
+            else:
+                return pane.import_document.cached_transactions[txn]
+
+
         try:
             pane_account = copy_account(pane.account)
 
+            new_matches = []
+
             for (e, ref) in matches:
-                for split in e.transaction.splits:
+                for indx, s in enumerate(e.transaction.splits):
+                    if e.split is s:
+                        split_indx = indx
+                        break
+                transaction = copy_transaction(e.transaction)
+                for split in transaction.splits:
                     split.account = copy_account(split.account)
-                # TODO: can we import only one split from a transaction?
-                # Do we need to do this?
-                if e.transaction in pane.import_document.transactions:
-                    pane.import_document.transactions.remove(e.transaction)
+
+                split = transaction.splits[split_indx]
+                new_entry = Entry(split, e.amount, e.balance, e.reconciled_balance, e.balance_with_budget)
+                new_matches.append((new_entry, ref))
+
 
             if pane.selected_target is not None:
                 # We import in an existing account, adjust all the transactions accordingly
@@ -611,7 +630,7 @@ class ImportWindow(MainWindowGUIObject):
             else:
                 target_account = pane_account # pane.account == new account
 
-            self.document.import_entries(target_account, pane_account, matches)
+            self.document.import_entries(target_account, pane_account, new_matches)
 
         except OperationAborted:
             pass
