@@ -146,11 +146,30 @@ class ImportTableRow(Row):
         self._description_import = self.imported.description if self.imported else ''
         self._payee_import = self.imported.payee if self.imported else ''
         self._checkno_import = self.imported.checkno if self.imported else ''
-        self._transfer_import = ', '.join(s.name for s in self.imported.transfer) if self.imported else ''
+        self._transfer_import = self.fmt_transfer(self.imported.transfer) if self.imported else ''
         self._amount_import = self.imported.amount if self.imported else None
     
     def unbind(self):
         self.table.pane.unbind(self.entry, self.imported)
+
+    def fmt_attr(self, attr, value):
+        if attr == 'date':
+            return self.fmt_date(value)
+        elif attr == 'transfer':
+            return self.fmt_transfer(value)
+        elif attr == 'amount':
+            return self.fmt_amount(value)
+        else:
+            return value
+
+    def fmt_transfer(self, transfer):
+        return ', '.join(s.name for s in self.imported.transfer)
+
+    def fmt_date(self, date):
+        return self.table.document.app.format_date(date)
+
+    def fmt_amount(self, amount):
+        return self.table.document.format_amount(amount)
     
     #--- Properties
     @property
@@ -160,7 +179,7 @@ class ImportTableRow(Row):
 
     @property
     def date(self):
-        return self.table.document.app.format_date(self._entry_date) if self._entry_date else ''
+        return self.fmt_date(self._entry_date) if self._entry_date else ''
     
     @property
     def description(self):
@@ -180,15 +199,6 @@ class ImportTableRow(Row):
 
     @_setter_guard
     def _change_entry(self, **kwargs):
-        t = transaction = self.imported.transaction
-        if not hasattr(t, 'attrs_changed'):
-            t.attrs_changed = set()
-            t.attrs_original = dict()
-        for k, v in kwargs.items():
-            if k not in t.attrs_changed:
-                t.attrs_original[k + '_import'] = getattr(self.imported, k)
-            if getattr(self.imported, k) != v:
-                t.attrs_changed.add(k + '_import')
         self.table.pane.import_document.change_entry(self.imported, **kwargs)
         self.table.pane.import_document.cook()
         self.table.pane.match_entries()
@@ -229,14 +239,22 @@ class ImportTableRow(Row):
 
     @transfer_import.setter
     def transfer_import(self, value):
+        if len(self.imported.transaction.splits) != 2:
+            msg = 'Sorry, you can not change the transfer of a transaction with more than two splits.'
+            self.table.document.app.view.show_message(msg)
+            return
         self._change_entry(transfer=value)
 
     @property
     def amount_import(self):
-        return self.table.document.format_amount(self._amount_import)
+        return self.fmt_amount(self._amount_import)
 
     @amount_import.setter
     def amount_import(self, value):
+        if len(self.imported.transaction.splits) != 2:
+            msg = 'Sorry, you can not change the amount of a transaction with more than two splits.'
+            self.table.document.app.view.show_message(msg)
+            return
         try:
             currency = self.imported.account.currency
             parsed = self.table.document.parse_amount(value, default_currency=currency)

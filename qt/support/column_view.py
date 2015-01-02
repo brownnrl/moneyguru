@@ -252,10 +252,9 @@ class ChangedPainter(Painter):
         if not hasattr(data, 'imported') or data.imported is None:
             return
 
-        data = data.imported.transaction
+        data = data.imported
 
-        if (hasattr(data, 'attrs_changed') and
-           self._attr_name in data.attrs_changed):
+        if data.changed(self._attr_name.replace('_import','')):
             option.font.setWeight(QFont.Bold)
             option.font.setItalic(True)
             option.backgroundBrush.setColor(Qt.yellow)

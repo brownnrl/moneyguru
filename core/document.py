@@ -13,6 +13,7 @@ import logging
 import os
 import os.path as op
 from functools import wraps
+from collections import defaultdict
 
 from hscommon.currency import Currency
 from hscommon.notify import Repeater
@@ -32,6 +33,8 @@ from .model.date import (
 )
 from .model.oven import Oven
 from .model.recurrence import Spawn
+from .model.entry import Entry
+from .model.transaction import Transaction
 from .model.transaction_list import TransactionList
 from .model.undo import Undoer, Action
 from .saver.native import save as save_native
@@ -1387,7 +1390,6 @@ class Document(Repeater, GUIObject):
         # this is called async
         self._async_autosave()
 
-
 class ImportDocument(Document):
     """
     A document used as a "staging area" for imports, using overrides to
@@ -1399,7 +1401,14 @@ class ImportDocument(Document):
         self.exported_accounts = dict()
         self.cached_transactions = dict()
         Document.__init__(self, app)
-
+        self.__fmt_amount = self.format_amount
+        self.__fmt_transfer = lambda v: ', '.join([acct.name for acct in v])
+        self.__fmt_date = lambda v: self.app.format_date(v)
+        self.__fmt_default = lambda v: v
+        self._attr2formatter = defaultdict(lambda : self.__fmt_default)
+        self._attr2formatter['amount'] = self.__fmt_amount
+        self._attr2formatter['date'] = self.__fmt_date
+        self._attr2formatter['transfer'] = self.__fmt_transfer
 
     def _async_autosave(self):
         pass
@@ -1425,6 +1434,22 @@ class ImportDocument(Document):
             return Document._get_dateformat(self)
         else:
             return self.force_date_format
+
+    def _record_original(self, transaction):
+        if not hasattr(transaction, 'original'):
+            transaction.original = transaction.replicate()
+            for index, split in enumerate(transaction.splits):
+                transaction.splits[index].original = transaction.original.splits[index]
+
+    def record_originals(self):
+        for transaction in self.transactions:
+            self._record_original(transaction)
+
+    def change_entry(self, entry, **kwargs):
+        Document.change_entry(self, entry, **kwargs)
+
+    def _change_transaction(self, transaction, **kwargs):
+        Document._change_transaction(self, transaction, **kwargs)
 
     def select_all_transactions_range(self):
         """Sets :attr:`date_range` to a :class:`.AllTransactionsRange`."""

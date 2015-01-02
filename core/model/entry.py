@@ -143,6 +143,29 @@ class Entry:
     def reference(self):
         """*readonly*. Proxy to :attr:`.Split.reference`."""
         return self.split.reference
+
+    def original(self, attr):
+        """Used in the import process, returns the original value."""
+        if not hasattr(self.split, 'original'):
+            return getattr(self, attr)
+        original_split = self.split.original
+        if attr == 'transfer':
+            original_splits = self.transaction.original.splits
+            other_splits = [split for split in original_splits
+                            if split is not original_split]
+            return [split.account for split in other_splits if split.account is not None]
+        if not hasattr(original_split, attr):
+            return getattr(self.transaction.original, attr)
+        return getattr(original_split, attr)
+
+    def changed(self, attr):
+        if not hasattr(self.split, 'original'):
+            return False
+        if attr == 'transfer':
+            return set(self.original('transfer')) != set(self.transfer)
+
+        return self.original(attr) != getattr(self, attr)
+
     
 
 class EntryList(Sequence):

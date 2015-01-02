@@ -43,6 +43,7 @@ class ImportTable(Table):
     
     #--- Data methods override
     def _getData(self, row, column, role):
+        base_attr = column.name.replace('_import', '')
         if column.name == 'will_import':
             if role == Qt.CheckStateRole:
                 return Qt.Checked if row.will_import else Qt.Unchecked
@@ -53,12 +54,12 @@ class ImportTable(Table):
                 return QPixmap(':/lock_12') if row.bound else None
             else:
                 return None
-        elif (role == Qt.ToolTipRole and
-                  column.name.endswith('import') and
-                  row.imported and
-                  hasattr(row.imported.transaction, 'attrs_original') and
-                  column.name in row.imported.transaction.attrs_original):
-            return "Original Value: " + str(row.imported.transaction.attrs_original[column.name])
+        elif ((role == Qt.ToolTipRole and
+               column.name.endswith('import') and
+               row.imported and
+               row.imported.changed(base_attr))):
+            original_value = row.imported.original(base_attr)
+            return "Original Value: " + row.fmt_attr(base_attr, original_value)
         else:
             return Table._getData(self, row, column, role)
     

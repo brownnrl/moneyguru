@@ -670,6 +670,7 @@ class ImportWindow(MainWindowGUIObject):
         import_document.schedules = self.mainwindow.loader.schedules
         import_document.budgets = self.mainwindow.loader.budgets
         import_document.oven = self.mainwindow.loader.oven
+        import_document.record_originals()
         import_document.cook()
         for account in accounts:
             target_account = None
