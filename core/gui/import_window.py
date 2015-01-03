@@ -197,8 +197,9 @@ class ReferenceBind(ImportBindPlugin):
             else:
                 import_entry = None
 
-            if import_entry is not None and not existing_entry.reconciled:
+            if import_entry is not None:
                 matches.append((existing_entry, import_entry, 0.99))
+
 
         return matches
 
@@ -276,6 +277,7 @@ class AccountPane:
         self.import_document = import_document
         self.parsing_date_format = self.import_document.parsing_date_format
         self.bind_plugins = bind_plugins
+        self.reference_plugin = ReferenceBind()
         self.account = account
         self._selected_target = target_account
         self.name = account.name
@@ -370,18 +372,23 @@ class AccountPane:
                 self.matches.append([None, i])
 
 
-    def match_entries(self):
+    def match_entries(self, binding_plugins=None, existing_entries=None, import_entries=None):
         self.account = self.import_document.accounts.find(self.name)
-        import_entries = self.account.entries[:]
-        if self.selected_target is not None:
-            existing_entries = self.selected_target.entries[:]
+        import_entries = self.account.entries[:] if not import_entries else import_entries
+        if self.selected_target is not None and not existing_entries:
+            existing_entries = self.selected_target.entries[:] if not existing_entries else existing_entries
         else:
-            existing_entries = []
+            existing_entries = [] if not existing_entries else existing_entries
 
         self._match_entries.clear()
         self.matches = []
 
-        for plugin in self.bind_plugins:
+        if binding_plugins:
+            binding_plugins = [self.reference_plugin] + binding_plugins
+        else:
+            binding_plugins = [self.reference_plugin]
+
+        for plugin in binding_plugins:
             matches = plugin.match_entries(self.selected_target,
                                            None,
                                            self.import_document,
