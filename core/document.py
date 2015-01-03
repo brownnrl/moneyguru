@@ -1397,7 +1397,7 @@ class ImportDocument(Document):
     """
 
     def __init__(self, app):
-        self.force_date_format = None
+        self.parsing_date_format = None
         self.exported_accounts = dict()
         self.cached_transactions = dict()
         Document.__init__(self, app)
@@ -1430,10 +1430,10 @@ class ImportDocument(Document):
         # We sometimes want to utilize the parsing date format
         # vs the application date format, so this method was added
         # to override that default behavior in document.
-        if self.force_date_format is None:
+        if self.parsing_date_format is None:
             return Document._get_dateformat(self)
         else:
-            return self.force_date_format
+            return self.parsing_date_format
 
     def _record_original(self, transaction):
         if not hasattr(transaction, 'original'):

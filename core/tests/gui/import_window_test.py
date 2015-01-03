@@ -537,8 +537,7 @@ def app_with_custom_import_plugin():
         def always_perform_action(self):
             return True
 
-        def perform_action(self, selected_pane, panes, transactions):
-            import_doc = selected_pane.import_document
+        def perform_action(self, import_document, transactions, panes):
             auto_pays = []
 
             # We go through all of our transactions searching for the keyword
@@ -552,17 +551,17 @@ def app_with_custom_import_plugin():
             if not auto_pays:
                 return
 
-            checking = import_doc.accounts.find('checking')
+            checking = import_document.accounts.find('checking')
 
             if checking is None:
                 # Create a checking account if no checking account is present
                 # in our current list of transactions
-                checking = import_doc.new_account(AccountType.Asset, None)  # No group
-                import_doc.accounts.set_account_name(checking, 'checking')
+                checking = import_document.new_account(AccountType.Asset, None)  # No group
+                import_document.accounts.set_account_name(checking, 'checking')
 
             # Reassign our transfers to checking
-            auto_pay_accounts = [import_doc.accounts.find(ap) for ap in auto_pays]
-            import_doc.delete_accounts(auto_pay_accounts, checking)
+            auto_pay_accounts = [import_document.accounts.find(ap) for ap in auto_pays]
+            import_document.delete_accounts(auto_pay_accounts, checking)
 
     class CustomPluginsApp(Application):
         def _load_plugins(self, plugin_path):

@@ -261,39 +261,14 @@ class ImportActionPlugin(Plugin, Broadcaster):
     ACTION_NAME = None
 
     def on_selected_pane_changed(self, selected_pane):
-        """
-        This method is called whenever the import window has changed it's selected pane.
-
-        :param core.gui.import_window.AccountPane selected_pane: Currently selected pane or None if no pane selected
-        """
+        """This method is called whenever the import window has changed it's selected pane."""
         pass
 
     def always_perform_action(self):
-        """
-        Eventually, this will be used to query whether every single possible transaction should
-        always have this action performed instead of using the single click 'Fix' button.
-        """
         return False
 
-    def can_perform_action(self, selected_pane, panes, transactions):
-        """
-        You shouldn't make any modifications to the provided transactions or panes.  But you can query the attributes
-        inside these parameters to determine if the user is given the ability to use your action.
-
-        :param core.gui.import_window.AccountPane selected_pane: Currently selected pane or None if no pane selected
-        :param list panes: List of the panes currently open in the import window
-        :param list transactions: A list of :class:`core.model.transaction.Transaction` objects (each row of the import table)
-        """
+    def can_perform_action(self, import_document, transactions, panes=None):
         return True
 
-    def perform_action(self, selected_pane, panes, transactions):
-        """
-        Go to town!  Most likely, you'll want to modify the transactions (changing the individual
-        rows) but you can also look up interesting information about account names through the
-        selected_pane or panes and their account attribute.
-
-        :param core.gui.import_window.AccountPane selected_pane: Currently selected pane or None if no pane selected
-        :param list panes: List of the panes currently open in the import window
-        :param list transactions: A list of :class:`core.model.transaction.Transaction` objects (each row of the import table)
-        """
+    def perform_action(self, import_document, transactions, panes=None):
         pass

@@ -23,8 +23,15 @@ from core.plugin import ImportActionPlugin, ImportBindPlugin
 from core.document import ImportDocument
 from core.model.account import Account
 from core.model.entry import Entry
-from collections import namedtuple
-from copy import copy
+from collections import namedtuple, defaultdict
+
+# Could be a good target for hscommon.util?
+def unique_groups(lst, keyfunc):
+    """Given a list and a keyfunction, return lists of all objects with the same key"""
+    results = defaultdict(list)
+    for itm in lst:
+        results[keyfunc(itm)].append(itm)
+    return results.values()
 
 DAY = 'day'
 MONTH = 'month'
@@ -64,13 +71,12 @@ class InvertAmountsPlugin(ImportActionPlugin):
     NAME = "Invert Amounts Import Action Plugin"
     ACTION_NAME = "Invert Amount"
 
-    def perform_action(self, selected_pane, panes, transactions):
-        for pane in panes:
-            for transaction in pane.import_document.transactions:
-                new = transaction.replicate()
-                for split in new.splits:
-                    split.amount = -split.amount
-                pane.import_document.change_transaction(transaction, new)
+    def perform_action(self, import_document, transactions, panes):
+        for transaction in transactions:
+            new = transaction.replicate()
+            for split in new.splits:
+                split.amount = -split.amount
+            import_document.change_transaction(transaction, new)
 
 
 class BaseSwapFields(ImportActionPlugin):
@@ -78,11 +84,7 @@ class BaseSwapFields(ImportActionPlugin):
     def _switch_function(self, transaction):
         pass
 
-    def perform_action(self, selected_pane, panes, transactions):
-        if selected_pane is None:
-            return
-
-        import_document = selected_pane.import_document
+    def perform_action(self, import_document, transactions, panes):
         for txn in transactions:
             new = txn.replicate()
             self._switch_function(new)
@@ -109,18 +111,15 @@ class BaseSwapDateFields(BaseSwapFields):
         transaction.date = swapped_date(transaction.date, self._first_field, self._second_field)
 
     def on_selected_pane_changed(self, selected_pane):
-        self._change_name(selected_pane)
+        self._change_name(selected_pane.parsing_date_format)
 
-    def _change_name(self, selected_pane):
-        if selected_pane is None:
-            return
-
-        basefmt = selected_pane.parsing_date_format
+    def _change_name(self, parsing_date_format):
+        basefmt = parsing_date_format
         swapped = swap_format_elements(basefmt, self._first_field, self._second_field)
         self.ACTION_NAME = "{} --> {}".format(basefmt.iso_format, swapped.iso_format)
         self.notify(self.action_name_changed)
 
-    def can_perform_action(self, selected_pane, panes, transactions):
+    def can_perform_action(self, import_document, transactions, panes):
         try:
             for txn in transactions:
                 swapped_date(txn.date, self._first_field, self._second_field)
@@ -128,15 +127,16 @@ class BaseSwapDateFields(BaseSwapFields):
         except ValueError:
             return False
 
-    def perform_action(self, selected_pane, panes, transactions):
-        super().perform_action(selected_pane, panes, transactions)
+    def perform_action(self, import_document, transactions, panes):
+        BaseSwapFields.perform_action(self, import_document, transactions, panes)
         # Now, lets' change the date format on these panes
         for pane in panes:
-            basefmt = selected_pane.parsing_date_format
+            basefmt = pane.parsing_date_format
             swapped = swap_format_elements(basefmt, self._first_field, self._second_field)
             pane.parsing_date_format = swapped
-        # We'll update our name to reflect the new date format
-        self._change_name(selected_pane)
+
+        self._change_name(panes[0].parsing_date_format)
+
 
 
 class SwapDayMonth(BaseSwapDateFields):
@@ -272,15 +272,15 @@ class EquivalenceBind(ImportBindPlugin):
 EntryProbability = namedtuple('EntryProbability', 'existing imported probability')
 
 class AccountPane:
-    def __init__(self, bind_plugins, import_document, account, target_account, parsing_date_format):
+    def __init__(self, bind_plugins, import_document, account, target_account):
         self.import_document = import_document
+        self.parsing_date_format = self.import_document.parsing_date_format
         self.bind_plugins = bind_plugins
         self.account = account
         self._selected_target = target_account
         self.name = account.name
         self.count = len(account.entries)
         self.matches = [] # [[ref, imported]]
-        self.parsing_date_format = parsing_date_format
         self.max_day = 31
         self.max_month = 12
         self.max_year = 99 # 2 digits
@@ -341,9 +341,9 @@ class AccountPane:
 
             processed.add(entry)
 
-        for (existing_entry, import_split), bound in self._user_binds.items():
+        for (existing_entry, import_transaction, split_index), bound in self._user_binds.items():
             if bound:
-                [import_entry] = [e for e in import_entries if e.split is import_split]
+                import_entry = self._get_matching_entry(import_transaction, split_index, import_entries)
                 self.matches.append([existing_entry, import_entry])
                 processed.add(existing_entry)
                 processed.add(import_entry)
@@ -354,11 +354,12 @@ class AccountPane:
         for import_entry in import_entries:
             append_entry(import_entry, True)
 
-        for (existing_entry, import_split), bound in self._user_binds.items():
+        for (existing_entry, import_transaction, split_index), bound in self._user_binds.items():
             if not bound:
+                import_entry = self._get_matching_entry(import_transaction, split_index, import_entries)
                 match = [[e, i] for [e, i] in self.matches if
                          e and i and
-                         (e, i.split) == (existing_entry, import_split)]
+                         (e, i) == (existing_entry, import_entry)]
                 if match:
                     [[e, i]] = match
                     self.matches.remove([e, i])
@@ -393,14 +394,45 @@ class AccountPane:
         self._sort_matches()
 
     def _sort_matches(self):
-        self.matches.sort(key=lambda t: (t[0].date if t[0] is not None else t[1].date, t[0] is None))
+        def key_func(t):
+            if None not in t:
+                return_date = t[1].date
+            elif t[0]:
+                return_date =t[0].date
+            else:
+                return_date = t[1].date
+            return return_date, t[0] is None
+
+        self.matches.sort(key=key_func)
+
+    def _get_matching_entry(self, transaction, split_index, entries):
+        for e in entries:
+            if e.transaction is transaction:
+                e_split_index = self._get_split_index(e)
+                if e_split_index == split_index:
+                    import_entry = e
+                    break
+        return import_entry  # We want to raise an exception here if no entry exists
+
+    def _get_split_index(self, entry):
+        for index, split in enumerate(entry.transaction.splits):
+            if split is entry.split:
+                split_index = index
+                break
+        return split_index  # We want to raise an exception here if no split_index exists
 
     def bind(self, existing, imported):
-        self._user_binds[(existing, imported.split)] = True  # Bind
+        # Only the reference to the original transaction is guarenteed to be retained
+        # after a cook, because of the way transaction.replicate() is used with
+        # the Document.change_transaction method.  So the only way to index back to
+        # the entry
+        split_index = self._get_split_index(imported)
+        self._user_binds[(existing, imported.transaction, split_index)] = True  # Bind
         self.match_entries()
 
     def unbind(self, existing, imported):
-        self._user_binds[(existing, imported.split)] = False  # Unbind
+        split_index = self._get_split_index(imported)
+        self._user_binds[(existing, imported.transaction, split_index)] = False  # Unbind
         self.match_entries()
 
     @property
@@ -460,26 +492,41 @@ class ImportWindow(MainWindowGUIObject):
             panes = self.panes.copy()
         else:
             panes = [self.selected_pane]
-
-        for p in panes.copy():
-            txns = dedupe(e.transaction for e in p.account.entries[:])
-            if not import_action.can_perform_action(p, [p], txns):
-                panes.remove(p)
-
-        entries = flatten(p.account.entries for p in panes)
-        txns = dedupe(e.transaction for e in entries)
-        return panes, entries, txns
+        results = []
+        # Groups of panes which share the same import document
+        pane_groups = unique_groups(panes, lambda p: p.import_document)
+        selected_group = None
+        for ps in pane_groups:
+            transactions = [e.transaction for p in ps for e in p.account.entries]
+            transactions = dedupe(transactions)
+            can_perform_action = import_action.can_perform_action(ps[0].import_document, transactions, ps)
+            if not can_perform_action:
+                continue
+            if self.selected_pane in ps:
+                selected_group = (ps[0].import_document, transactions, ps)
+            else:
+                results.append((ps[0].import_document, transactions, ps))
+        # We want to ensure that the selected pane group is the last to be called
+        # allowing the name of the plugin to update.
+        if selected_group:
+            results.append(selected_group)
+        return results
 
     def _perform_action(self, import_action, apply_to_all):
         if self.selected_pane is None:
             return
-        panes, entries, txns = self._collect_action_params(import_action, apply_to_all)
-        if panes:  # If there are no relevant panes, we shouldn't perform the action
-            import_action.perform_action(self.selected_pane, panes, txns)
+
+        action_params = self._collect_action_params(import_action, apply_to_all)
+
+        if not action_params:
+            return
+
+        for import_document, transactions, panes in action_params:
+            import_action.perform_action(import_document, transactions, panes)
 
         self.selected_pane.import_document.cook()
 
-        for pane in panes:
+        for pane in self.panes:
             pane.match_entries()
 
         self.import_table.refresh()
@@ -556,16 +603,16 @@ class ImportWindow(MainWindowGUIObject):
     def can_perform_swap(self):
         index = self.swap_type_list.selected_index
         import_action = self._import_action_plugins[index]
-        panes, _, txns = self._collect_action_params(import_action, True)
+        action_params = self._collect_action_params(import_action, True)
         # We actually perform can_perform_action as part of the _collect_action_params
         # so we don't need to run the explicit check twice, just check to see if
         # the seleced pane was one of the "passing" panes.
         # Also, we consider having no panes unable to perform all actions (mimicing
         # prior implementation)
-        if panes == []:
+        if not action_params:
             return False
-
-        return self.selected_pane in panes
+        else:
+            return True
 
     def close_pane(self, index):
         was_selected = index == self.selected_pane_index
@@ -665,6 +712,7 @@ class ImportWindow(MainWindowGUIObject):
         accounts = [a for a in self.mainwindow.loader.accounts if a.is_balance_sheet_account() and a.entries]
 
         parsing_date_format = DateFormat.from_sysformat(self.mainwindow.loader.parsing_date_format)
+        import_document.parsing_date_format = parsing_date_format
         import_document.accounts = self.mainwindow.loader.accounts
         import_document.transactions = self.mainwindow.loader.transactions
         import_document.schedules = self.mainwindow.loader.schedules
@@ -683,8 +731,7 @@ class ImportWindow(MainWindowGUIObject):
             self.panes.append(AccountPane(self._bind_plugins,
                                           import_document,
                                           account,
-                                          target_account,
-                                          parsing_date_format))
+                                          target_account))
         # XXX Should replace by _update_selected_pane()?
 
         self._always_perform_actions()
