@@ -78,7 +78,7 @@ class Painter:
         value = getattr(value, column.name)
         return QSize(option.fontMetrics.width(value), option.fontMetrics.height())
 
-    def pre_paint(self, painter, option, index):
+    def pre_paint(self, option, index):
         pass
 
     def paint(self, painter, option, index):
@@ -246,7 +246,7 @@ class ChangedPainter(Painter):
     def paints_text(self):
         return self._paints_text
 
-    def pre_paint(self, painter, option, index):
+    def pre_paint(self, option, index):
         data, column = self._getDataFromIndex(index)
 
         if not hasattr(data, 'imported') or data.imported is None:
@@ -254,11 +254,10 @@ class ChangedPainter(Painter):
 
         data = data.imported
 
-        if data.changed(self._attr_name.replace('_import','')):
+        if data.changed(self._attr_name.replace('_import', '')):
             option.font.setWeight(QFont.Bold)
             option.font.setItalic(True)
-            option.backgroundBrush.setColor(Qt.yellow)
-            painter.fillRect(option.rect, Qt.yellow)
+            option.backgroundBrush = QBrush(Qt.yellow)
 
 
 class AmountChangedPainter(Painter):
@@ -274,8 +273,8 @@ class AmountChangedPainter(Painter):
     def sizeHint(self, option, index):
         return self._amount_painter.sizeHint(option, index)
 
-    def pre_paint(self, painter, option, index):
-        self._changed_painter.pre_paint(painter, option, index)
+    def pre_paint(self, option, index):
+        self._changed_painter.pre_paint(option, index)
 
     def paint(self, painter, option, index):
         self._amount_painter.paint(painter, option, index)

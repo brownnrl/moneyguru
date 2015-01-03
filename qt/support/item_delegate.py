@@ -107,6 +107,21 @@ class ItemDelegate(QStyledItemDelegate):
             currentRight -= pixmap.width()
         return False
 
+    def initStyleOption(self, option, index):
+        QStyledItemDelegate.initStyleOption(self, option, index)
+        value_painter = self._get_value_painter(index)
+        decorations = self._get_decorations(index, bool(option.state & QStyle.State_Selected))
+        if decorations:
+            option.decorationPosition = QStyleOptionViewItemV4.Right
+            decorationWidth = sum(dec.pixmap.width() for dec in decorations)
+            decorationHeight = max(dec.pixmap.height() for dec in decorations)
+            option.decorationSize = QSize(decorationWidth, decorationHeight)
+            option.features |= QStyleOptionViewItemV4.HasDecoration
+        if value_painter:
+            value_painter.pre_paint(option, index)
+        self._prepare_paint_options(option, index)
+
+
     def paint(self, painter, option, index):
         """Performs custom painting of value of data in the model and decorations.
 
@@ -122,22 +137,14 @@ class ItemDelegate(QStyledItemDelegate):
         # I don't know why I have to do this. option.version returns 4, but still, when I try to
         # access option.features, boom-crash. The workaround is to force a V4.
         option = QStyleOptionViewItemV4(option)
-        decorations = self._get_decorations(index, bool(option.state & QStyle.State_Selected))
-        if decorations:
-            option.decorationPosition = QStyleOptionViewItemV4.Right
-            decorationWidth = sum(dec.pixmap.width() for dec in decorations)
-            decorationHeight = max(dec.pixmap.height() for dec in decorations)
-            option.decorationSize = QSize(decorationWidth, decorationHeight)
-            option.features |= QStyleOptionViewItemV4.HasDecoration
-        self._prepare_paint_options(option, index)
 
         xOffset = 0
         # First added for #15, the painting of custom amount information.  This can
         # be used as a pattern for painting any column of information.
         painter.save()
         value_painter = self._get_value_painter(index)
+        decorations = self._get_decorations(index, bool(option.state & QStyle.State_Selected))
         if value_painter:
-            value_painter.pre_paint(painter, option, index)
             self._display_text = not value_painter.paints_text
         else:
             self._display_text = True
