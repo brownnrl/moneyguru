@@ -50,7 +50,8 @@ class Columns:
         # See moneyguru #14 and #15.  This was added in order to allow automatic resizing of columns.
         for column in self.model.column_list:
             if column.resizeToFit:
-                self._headerView.setResizeMode(column.logical_index, QHeaderView.ResizeToContents)
+                # self._headerView.setResizeMode(column.logical_index, QHeaderView.ResizeToContents)
+                pass
     
     #--- Public
     def setColumnsWidth(self, widths):

@@ -28,6 +28,7 @@ class AmountPainter:
     def __init__(self, attr_name, model):
         self._attr_name = attr_name
         self._model = model
+        self.displays_text = True
 
     # private functions
     def _getDataFromIndex(self, index):
@@ -91,7 +92,7 @@ class AmountPainter:
         # for separate painting.
         cur_width = option.fontMetrics.width(amount.currency) \
             if do_paint_currency \
-            else option.fontMetrics.width("XXX")
+            else 0  # option.fontMetrics.width("XXX")
         val_width = option.fontMetrics.width(amount.value)
 
         return cur_width, val_width
@@ -114,7 +115,19 @@ class AmountPainter:
         option = QStyleOptionViewItemV4(option)
         cur_width, val_width = self._getAmountTextWidths(amount, option)
         # Add some extra spacing in between (15) and padding on sides (5,5)
-        return QSize(5+cur_width+15+val_width+5, option.fontMetrics.height())
+        if cur_width == 0:
+            return QSize(5+val_width+5, option.fontMetrics.height())
+        else:
+            return QSize(5+cur_width+15+val_width+5, option.fontMetrics.height())
+
+    def pre_paint(self, option, index):
+        amount = self._getDataFromIndex(index)
+        if amount is None:
+            return None
+
+        cur_width, val_width = self._getAmountTextWidths(amount, option)
+        # print(index.row(), option.rect.width(), size_hint.width())
+        self.displays_text = option.rect.width() >= cur_width + val_width + 10
 
     def paint(self, painter, option, index):
         """Paints the amount within the bounding box provided in the option parameter.
@@ -127,6 +140,10 @@ class AmountPainter:
             option - QStyleOptionViewItemV4
             index - QModelIndex in the model
         """
+
+        if not self.displays_text:
+            return
+
         column_data = self._getDataFromIndex(index)
         if column_data is None:
             return

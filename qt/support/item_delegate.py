@@ -122,28 +122,32 @@ class ItemDelegate(QStyledItemDelegate):
         # I don't know why I have to do this. option.version returns 4, but still, when I try to
         # access option.features, boom-crash. The workaround is to force a V4.
         option = QStyleOptionViewItemV4(option)
+        self._prepare_paint_options(option, index)
         decorations = self._get_decorations(index, bool(option.state & QStyle.State_Selected))
+        xOffset = 0
         if decorations:
             option.decorationPosition = QStyleOptionViewItemV4.Right
             decorationWidth = sum(dec.pixmap.width() for dec in decorations)
             decorationHeight = max(dec.pixmap.height() for dec in decorations)
+            xOffset += decorationWidth
             option.decorationSize = QSize(decorationWidth, decorationHeight)
             option.features |= QStyleOptionViewItemV4.HasDecoration
-        self._prepare_paint_options(option, index)
 
-        xOffset = 0
         # First added for #15, the painting of custom amount information.  This can
         # be used as a pattern for painting any column of information.
         value_painter = self._get_value_painter(index)
-        self._display_text = value_painter is None
-        QStyledItemDelegate.paint(self, painter, option, index)
         if value_painter is not None:
             value_option = QStyleOptionViewItemV4(option)
             rect = value_option.rect
             rect = QRect(rect.left(), rect.top(), rect.width() - xOffset, rect.height())
             value_option.rect = rect
+            value_painter.pre_paint(value_option, index)
+        self._display_text = value_painter is None or not value_painter.displays_text
+        QStyledItemDelegate.paint(self, painter, option, index)
+        if value_painter is not None:
             value_painter.paint(painter, value_option, index)
 
+        xOffset = 0
         for dec in decorations:
             pixmap = dec.pixmap
             x = option.rect.right() - pixmap.width() - xOffset
