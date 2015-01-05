@@ -267,8 +267,8 @@ class ImportActionPlugin(Plugin, Broadcaster):
     def always_perform_action(self):
         return False
 
-    def can_perform_action(self, import_document, transactions, panes=None):
+    def can_perform_action(self, import_document, transactions, panes, selected_rows=None):
         return True
 
-    def perform_action(self, import_document, transactions, panes=None):
+    def perform_action(self, import_document, transactions, panes, selected_rows=None):
         pass

@@ -15,6 +15,7 @@ from qtlib.selectable_list import ComboboxModel
 
 from ...support.item_view import TableView
 from .table import ImportTable
+from core.gui.import_window import ActionSelectionOptions
 
 tr = trget('ui')
 
@@ -54,10 +55,14 @@ class ImportWindow(QWidget):
         self.gridLayout = QtGui.QGridLayout(self.groupBox)
         self.swapOptionsComboBoxView = QComboBox(self.groupBox)
         self.gridLayout.addWidget(self.swapOptionsComboBoxView, 0, 0, 1, 2)
+        self.applyToSelectionCheckBox = QtGui.QCheckBox(tr("Apply to selection"))
         self.applyToAllCheckBox = QtGui.QCheckBox(tr("Apply to all accounts"))
-        self.gridLayout.addWidget(self.applyToAllCheckBox, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.applyToSelectionCheckBox, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.applyToAllCheckBox, 1, 1, 1, 1)
+        self.applyToAllCheckBox.stateChanged.connect(self._allStateChanged)
+        self.applyToSelectionCheckBox.stateChanged.connect(self._selectionStateChanged)
         self.swapButton = QPushButton(tr("Fix"))
-        self.gridLayout.addWidget(self.swapButton, 1, 1, 1, 1)
+        self.gridLayout.addWidget(self.swapButton, 2, 1, 1, 1)
         self.targetAccountLayout.addWidget(self.groupBox)
         self.verticalLayout.addLayout(self.targetAccountLayout)
         self.tableView = TableView(self)
@@ -86,7 +91,13 @@ class ImportWindow(QWidget):
         l = self.targetAccountLayout
         l.setAlignment(self.targetAccountLabel, Qt.AlignTop)
         l.setAlignment(self.targetAccountComboBox, Qt.AlignTop)
-    
+
+    def _allStateChanged(self, state):
+        self.applyToSelectionCheckBox.setEnabled(state == Qt.Unchecked)
+
+    def _selectionStateChanged(self, state):
+        self.applyToAllCheckBox.setEnabled(state == Qt.Unchecked)
+
     #--- Event Handlers
     def currentTabChanged(self, index):
         self.model.selected_pane_index = index
@@ -95,8 +106,12 @@ class ImportWindow(QWidget):
         self.model.import_selected_pane()
     
     def swapClicked(self):
-        applyToAll = self.applyToAllCheckBox.isChecked()
-        self.model.perform_swap(applyToAll)
+        apply = ActionSelectionOptions.ApplyToPane
+        if self.applyToAllCheckBox.isChecked():
+            apply = ActionSelectionOptions.ApplyToAll
+        elif self.applyToSelectionCheckBox.isChecked():
+            apply = ActionSelectionOptions.ApplyToSelection
+        self.model.perform_swap(apply)
     
     def tabCloseRequested(self, index):
         self.model.close_pane(index)
@@ -143,4 +158,3 @@ class ImportWindow(QWidget):
             self.tabView.setCurrentIndex(index)
         self.targetAccountComboBox.setCurrentIndex(self.model.selected_target_account_index)
         self.table.updateColumnsVisibility()
-    

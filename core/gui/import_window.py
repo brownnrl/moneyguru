@@ -44,6 +44,11 @@ class SwapType:
     DescriptionPayee = 3
     InvertAmount = 4
 
+class ActionSelectionOptions:
+    ApplyToPane = 0
+    ApplyToAll = 1
+    ApplyToSelection = 2
+
 def last_two_digits(year):
     return year - ((year // 100) * 100)
 
@@ -71,7 +76,7 @@ class InvertAmountsPlugin(ImportActionPlugin):
     NAME = "Invert Amounts Import Action Plugin"
     ACTION_NAME = "Invert Amount"
 
-    def perform_action(self, import_document, transactions, panes):
+    def perform_action(self, import_document, transactions, panes, selected_rows=None):
         for transaction in transactions:
             new = transaction.replicate()
             for split in new.splits:
@@ -84,7 +89,7 @@ class BaseSwapFields(ImportActionPlugin):
     def _switch_function(self, transaction):
         pass
 
-    def perform_action(self, import_document, transactions, panes):
+    def perform_action(self, import_document, transactions, panes, selected_rows=None):
         for txn in transactions:
             new = txn.replicate()
             self._switch_function(new)
@@ -119,7 +124,7 @@ class BaseSwapDateFields(BaseSwapFields):
         self.ACTION_NAME = "{} --> {}".format(basefmt.iso_format, swapped.iso_format)
         self.notify(self.action_name_changed)
 
-    def can_perform_action(self, import_document, transactions, panes):
+    def can_perform_action(self, import_document, transactions, panes, selected_rows=None):
         try:
             for txn in transactions:
                 swapped_date(txn.date, self._first_field, self._second_field)
@@ -127,8 +132,8 @@ class BaseSwapDateFields(BaseSwapFields):
         except ValueError:
             return False
 
-    def perform_action(self, import_document, transactions, panes):
-        BaseSwapFields.perform_action(self, import_document, transactions, panes)
+    def perform_action(self, import_document, transactions, panes, selected_rows=None):
+        BaseSwapFields.perform_action(self, import_document, transactions, panes, selected_rows=None)
         # Now, lets' change the date format on these panes
         for pane in panes:
             basefmt = pane.parsing_date_format
@@ -494,12 +499,34 @@ class ImportWindow(MainWindowGUIObject):
 
     #--- Private
 
-    def _collect_action_params(self, import_action, apply_to_all):
-        if apply_to_all:
+    def _collect_action_params(self, import_action, apply=ActionSelectionOptions.ApplyToPane):
+        if apply == ActionSelectionOptions.ApplyToSelection:
+            if not self.selected_pane:
+                return []
+
+            panes = [self.selected_pane]
+            selected_rows = self.import_table.selected_rows
+
+            if not selected_rows:
+                return []
+
+            transactions = [row.imported.transaction for row in selected_rows if row.imported]
+            transactions = dedupe(transactions)
+            can_perform_action = import_action.can_perform_action(panes[0].import_document,
+                                                                  transactions,
+                                                                  panes,
+                                                                  selected_rows)
+            if not can_perform_action:
+                return []
+
+            return [(panes[0].import_document, transactions, panes, selected_rows)]
+
+        if apply == ActionSelectionOptions.ApplyToAll:
             panes = self.panes.copy()
         else:
             panes = [self.selected_pane]
         results = []
+
         # Groups of panes which share the same import document
         pane_groups = unique_groups(panes, lambda p: p.import_document)
         selected_group = None
@@ -519,17 +546,17 @@ class ImportWindow(MainWindowGUIObject):
             results.append(selected_group)
         return results
 
-    def _perform_action(self, import_action, apply_to_all):
+    def _perform_action(self, import_action, apply=ActionSelectionOptions.ApplyToPane):
         if self.selected_pane is None:
             return
 
-        action_params = self._collect_action_params(import_action, apply_to_all)
+        action_params = self._collect_action_params(import_action, apply)
 
         if not action_params:
             return
 
-        for import_document, transactions, panes in action_params:
-            import_action.perform_action(import_document, transactions, panes)
+        for action_param in action_params:
+            import_action.perform_action(*action_param)
 
         self.selected_pane.import_document.cook()
 
@@ -572,8 +599,9 @@ class ImportWindow(MainWindowGUIObject):
         if self.selected_pane:
             self.selected_pane.match_entries()
         self.import_table.refresh()
-        for plugin in self._import_action_plugins:
-            plugin.on_selected_pane_changed(self.selected_pane)
+        if self.selected_pane:
+            for plugin in self._import_action_plugins:
+                plugin.on_selected_pane_changed(self.selected_pane)
         self._refresh_swap_list_items()
         self.view.update_selected_pane()
         self.view.set_swap_button_enabled(self.can_perform_swap())
@@ -692,10 +720,10 @@ class ImportWindow(MainWindowGUIObject):
             self.close_pane(self.selected_pane_index)
             self.view.close_selected_tab()
 
-    def perform_swap(self, apply_to_all=False):
+    def perform_swap(self, apply=ActionSelectionOptions.ApplyToPane):
         index = self.swap_type_list.selected_index
         import_action = self._import_action_plugins[index]
-        self._perform_action(import_action, apply_to_all)
+        self._perform_action(import_action, apply)
 
     def refresh_targets(self):
         self.target_accounts = [a for a in self.document.accounts if a.is_balance_sheet_account()]
