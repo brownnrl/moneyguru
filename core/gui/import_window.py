@@ -37,20 +37,25 @@ DAY = 'day'
 MONTH = 'month'
 YEAR = 'year'
 
+
 class SwapType:
     DayMonth = 0
     MonthYear = 1
     DayYear = 2
     DescriptionPayee = 3
     InvertAmount = 4
+    MatchSimilar = 5
+
 
 class ActionSelectionOptions:
     ApplyToPane = 0
-    ApplyToAll = 1
+    ApplyToAll = 1  # Ordering is important to respect legacy code (0/1 : False/True comparisons)
     ApplyToSelection = 2
+
 
 def last_two_digits(year):
     return year - ((year // 100) * 100)
+
 
 def swapped_date(date, first, second):
     attrs = {DAY: date.day, MONTH: date.month, YEAR: last_two_digits(date.year)}
@@ -58,6 +63,7 @@ def swapped_date(date, first, second):
     if YEAR in newattrs:
         newattrs[YEAR] += 2000
     return date.replace(**newattrs)
+
 
 def swap_format_elements(format, first, second):
     # format is a DateFormat
@@ -143,7 +149,6 @@ class BaseSwapDateFields(BaseSwapFields):
         self._change_name(panes[0].parsing_date_format)
 
 
-
 class SwapDayMonth(BaseSwapDateFields):
 
     ACTION_NAME = "<placeholder> Day <--> Month"
@@ -178,6 +183,7 @@ class SwapMonthYear(BaseSwapDateFields):
         super().__init__()
         self._first_field = MONTH
         self._second_field = YEAR
+
 
 class ReferenceBind(ImportBindPlugin):
 
@@ -275,6 +281,50 @@ class EquivalenceBind(ImportBindPlugin):
                 break
         return matches
 
+
+class RevertPlugin(ImportActionPlugin):
+
+    NAME = "Revert changes plugin"
+    ACTION_NAME = "Revert changes in yellow"
+
+    def _revert_transactions(self, import_document, transactions):
+        transactions = dedupe(transactions)
+
+        for transaction in transactions:
+            if not hasattr(transaction, 'original'):
+                continue
+            import_document.change_transaction(transaction, transaction.original)
+
+    def perform_action(self, import_document, transactions, panes, selected_rows=None):
+
+        if selected_rows:
+            txns = [e.imported.transaction for e in selected_rows if e.imported]
+            self._revert_transactions(import_document, txns)
+            return
+
+        self._revert_transactions(import_document, transactions)
+
+
+
+class BindSimilarPlugin(ImportActionPlugin, EquivalenceBind):
+
+    NAME = "Bind Similar Import Action Plugin"
+    ACTION_NAME = "Bind Similar Entries"
+
+    def perform_action(self, import_document, transactions, panes, selected_rows=None):
+
+        def match_entries(pane, import_entries):
+            if not pane.selected_target:
+                return
+
+            pane.match_entries([self], import_entries)
+
+        if selected_rows:
+            match_entries(panes[0], [e.imported for e in selected_rows if e.imported])
+        else:
+            for pane in panes:
+                match_entries(pane, pane.import_entries)
+
 EntryProbability = namedtuple('EntryProbability', 'existing imported probability')
 
 class AccountPane:
@@ -294,6 +344,7 @@ class AccountPane:
         self._match_entries = dict()
         self._user_binds = dict()  # tracks binds / unbinds as indicated by the user.
         self._match_probabilties = dict()
+        self.match_flag = False
         self.match_entries()
 
     def _remove_match(self, match):
@@ -304,49 +355,63 @@ class AccountPane:
 
     def _determine_best_matches(self, matches):
 
-        def check_better(entry, probability):
-            conflict = self._match_entries.get(entry, None)
+        def check_better(key, probability):
+            conflict = self._match_entries.get(key, None)
             if conflict and conflict.probability < probability:
                 self._remove_match(conflict)
 
         # Take existing entry that is recommended to be mapped to an import entry
         for existing_entry, imported_entry, probability in matches:
+            import_key = self._get_matching_key(imported_entry)
             check_better(existing_entry, probability)
-            check_better(imported_entry, probability)
+            check_better(import_key, probability)
 
             if (existing_entry not in self._match_entries and
-                imported_entry not in self._match_entries):
-                new_match = EntryProbability(existing_entry, imported_entry, probability)
+                import_key not in self._match_entries):
+                new_match = EntryProbability(existing_entry, import_key, probability)
                 self._match_entries[existing_entry] = new_match
-                self._match_entries[imported_entry] = new_match
+                self._match_entries[import_key] = new_match
 
 
-    def _convert_matches(self, import_entries, existing_entries):
+    def _convert_matches(self):
+
+        import_entries = self.import_entries
+
+        existing_entries = self.existing_entries
+
+        self.matches.clear()
 
         processed = set()
 
         def append_entry(entry, is_import):
 
-            if entry in processed:
+            if (((is_import and self._get_matching_key(entry) in processed) or
+                 entry in processed)):
                 return
 
-            match_entry = self._match_entries.get(entry, None)
+            key = self._get_matching_key(entry) if is_import else entry
+            match_entry = self._match_entries.get(key, None)
 
             if (match_entry and
                   match_entry.existing not in processed and
                   match_entry.imported not in processed):
-                self.matches.append([match_entry.existing, match_entry.imported])
+                if is_import:
+                    self.matches.append([match_entry.existing, entry])
+                else:
+                    [import_entry] = [e for e in import_entries
+                                      if self._get_matching_key(e) == match_entry.imported]
+                    self.matches.append([entry, import_entry])
                 processed.add(match_entry.existing)
                 processed.add(match_entry.imported)
 
                 if match_entry.existing.reconciled:
-                    match_entry.imported.will_import = False
+                    import_entry.will_import = False
             elif is_import:
                 self.matches.append([None, entry])
             elif not entry.reconciled:
                 self.matches.append([entry, None])
 
-            processed.add(entry)
+            processed.add(key)
 
         for (existing_entry, import_transaction, split_index), bound in self._user_binds.items():
             if bound:
@@ -377,16 +442,10 @@ class AccountPane:
                 self.matches.append([None, i])
 
 
-    def match_entries(self, binding_plugins=None, existing_entries=None, import_entries=None):
+    def match_entries(self, binding_plugins=None, import_entries=None):
         self.account = self.import_document.accounts.find(self.name)
         import_entries = self.account.entries[:] if not import_entries else import_entries
-        if self.selected_target is not None and not existing_entries:
-            existing_entries = self.selected_target.entries[:] if not existing_entries else existing_entries
-        else:
-            existing_entries = [] if not existing_entries else existing_entries
-
-        self._match_entries.clear()
-        self.matches = []
+        existing_entries = self.existing_entries
 
         if binding_plugins:
             binding_plugins = [self.reference_plugin] + binding_plugins
@@ -402,8 +461,9 @@ class AccountPane:
 
             self._determine_best_matches(matches)
 
-        self._convert_matches(import_entries, existing_entries)
+        self._convert_matches()
         self._sort_matches()
+        self.match_flag = True
 
     def _sort_matches(self):
         def key_func(t):
@@ -416,6 +476,9 @@ class AccountPane:
             return return_date, t[0] is None
 
         self.matches.sort(key=key_func)
+
+    def _get_matching_key(self, entry):
+        return entry.transaction, self._get_split_index(entry)
 
     def _get_matching_entry(self, transaction, split_index, entries):
         for e in entries:
@@ -440,12 +503,12 @@ class AccountPane:
         # the entry
         split_index = self._get_split_index(imported)
         self._user_binds[(existing, imported.transaction, split_index)] = True  # Bind
-        self.match_entries()
+        self._convert_matches()
 
     def unbind(self, existing, imported):
         split_index = self._get_split_index(imported)
         self._user_binds[(existing, imported.transaction, split_index)] = False  # Unbind
-        self.match_entries()
+        self._convert_matches()
 
     @property
     def selected_target(self):
@@ -453,8 +516,24 @@ class AccountPane:
 
     @selected_target.setter
     def selected_target(self, value):
+        if self._selected_target is value:
+            return
+        print(self.name, value)
         self._selected_target = value
+        self._match_entries.clear()
+        self.matches.clear()
         self.match_entries()
+
+    @property
+    def import_entries(self):
+        return self.import_document.accounts.find(self.name).entries[:]
+
+    @property
+    def existing_entries(self):
+        if not self.selected_target:
+            return []
+        else:
+            return self.selected_target.entries[:]
 
 
 class ImportWindow(MainWindowGUIObject):
@@ -476,7 +555,9 @@ class ImportWindow(MainWindowGUIObject):
                                        SwapMonthYear(),
                                        SwapDayYear(),
                                        SwapDescriptionPayeeAction(),
-                                       InvertAmountsPlugin()]
+                                       InvertAmountsPlugin(),
+                                       BindSimilarPlugin(),
+                                       RevertPlugin()]
         self._always_import_action_plugins = []
 
         self._bind_plugins = [EquivalenceBind(),
@@ -555,13 +636,22 @@ class ImportWindow(MainWindowGUIObject):
         if not action_params:
             return
 
+        panes = dedupe(flatten((grp[2] for grp in action_params)))
+
+        for pane in panes:
+            pane.match_flag = False
+            pane.import_document.cook_flag = False
+
         for action_param in action_params:
             import_action.perform_action(*action_param)
 
-        self.selected_pane.import_document.cook()
+        for pane in panes:
+            if not pane.import_document.cook_flag:
+                pane.import_document.cook()
 
-        for pane in self.panes:
-            pane.match_entries()
+        for pane in panes:
+            if not pane.match_flag:
+                pane.match_entries()
 
         self.import_table.refresh()
 
@@ -579,6 +669,7 @@ class ImportWindow(MainWindowGUIObject):
                 self._selected_target_index = self.target_accounts.index(target) + 1
             except ValueError:
                 pass
+        self.import_table.refresh()
 
     def _refresh_swap_list_items(self):
         if not self.panes:
@@ -596,8 +687,6 @@ class ImportWindow(MainWindowGUIObject):
         self.swap_type_list[:] = names
 
     def _update_selected_pane(self):
-        if self.selected_pane:
-            self.selected_pane.match_entries()
         self.import_table.refresh()
         if self.selected_pane:
             for plugin in self._import_action_plugins:
@@ -772,8 +861,6 @@ class ImportWindow(MainWindowGUIObject):
         self._always_perform_actions()
         self._refresh_target_selection()
         self._refresh_swap_list_items()
-        if self.selected_pane:
-            self.selected_pane.match_entries()
         self.import_table.refresh()
 
     def show(self):

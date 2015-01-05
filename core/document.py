@@ -1400,6 +1400,7 @@ class ImportDocument(Document):
         self.parsing_date_format = None
         self.exported_accounts = dict()
         self.cached_transactions = dict()
+        self.cook_flag = False
         Document.__init__(self, app)
         self.__fmt_amount = self.format_amount
         self.__fmt_transfer = lambda v: ', '.join([acct.name for acct in v])
@@ -1435,21 +1436,19 @@ class ImportDocument(Document):
         else:
             return self.parsing_date_format
 
-    def _record_original(self, transaction):
-        if not hasattr(transaction, 'original'):
-            transaction.original = transaction.replicate()
-            for index, split in enumerate(transaction.splits):
-                transaction.splits[index].original = transaction.original.splits[index]
+    def record_original(self, transaction):
+        transaction.original = transaction.replicate()
 
     def record_originals(self):
         for transaction in self.transactions:
-            self._record_original(transaction)
+            self.record_original(transaction)
 
     def change_entry(self, entry, **kwargs):
         Document.change_entry(self, entry, **kwargs)
 
     def _change_transaction(self, transaction, **kwargs):
         Document._change_transaction(self, transaction, **kwargs)
+        transaction.original = transaction.original
 
     def select_all_transactions_range(self):
         """Sets :attr:`date_range` to a :class:`.AllTransactionsRange`."""
@@ -1476,6 +1475,7 @@ class ImportDocument(Document):
         in the import cycle. This requires the import window to be able to tell it
         to re-do it's account entries.
         """
+        self.cook_flag = True
         self.select_all_transactions_range()
         self.oven.cook(from_date=None, until_date=None)
 

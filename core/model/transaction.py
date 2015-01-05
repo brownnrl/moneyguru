@@ -51,6 +51,7 @@ class Transaction:
         #: Timestamp of the last modification. Used in the UI to let the user sort his transactions.
         #: This is useful for finding a mistake that we know was introduced recently.
         self.mtime = 0
+        self._original = None
 
     def __repr__(self):
         return '<%s %r %r>' % (self.__class__.__name__, self.date, self.description)
@@ -460,6 +461,17 @@ class Transaction:
         """*readonly*. ``bool``. Whether our splits all have null amounts."""
         return all(not s.amount for s in self.splits)
 
+    @property
+    def original(self):
+        return self._original
+
+    @original.setter
+    def original(self, value):
+        self._original = value
+
+        for index, split in enumerate(self.splits):
+            split.original = value.splits[index]
+
 
 class Split:
     """Assignment of money to an :class:`.Account` within a :class:`Transaction`."""
@@ -474,6 +486,7 @@ class Split:
         self.reconciliation_date = None
         #: Unique reference from an external source.
         self.reference = None
+        self._original = None
 
     def __repr__(self):
         return '<Split %r %s>' % (self.account_name, self.amount)
@@ -546,3 +559,10 @@ class Split:
         """*readonly*. ``bool``. Whether :attr:`reconciliation_date` is set to something."""
         return self.reconciliation_date is not None
 
+    @property
+    def original(self):
+        return self._original
+
+    @original.setter
+    def original(self, value):
+        self._original = value

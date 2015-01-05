@@ -86,6 +86,8 @@ class ItemDelegate(QStyledItemDelegate):
             decorations.
 
         """
+        if not index.isValid():
+            return QSize(0, 0)
         value_painter = self._get_value_painter(index)
         if value_painter is None:
             return QStyledItemDelegate.sizeHint(self, option, index)

@@ -109,7 +109,12 @@ class AmountPainter(Painter):
 
             "MXN 432 321,01" -> DisplayAmount("MXN", "432 321,01")
         """
-        amount, column = Painter._getDataFromIndex(self, index)
+        data = Painter._getDataFromIndex(self, index)
+
+        if not data:
+            return
+
+        amount, column = data
 
         amount = getattr(amount, column.name)
 
