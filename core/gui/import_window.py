@@ -413,9 +413,9 @@ class AccountPane:
 
             processed.add(key)
 
-        for (existing_entry, import_transaction, split_index), bound in self._user_binds.items():
+        for (existing_entry, import_transaction, split), bound in self._user_binds.items():
             if bound:
-                import_entry = self._get_matching_entry(import_transaction, split_index, import_entries)
+                import_entry = self._get_matching_entry(import_transaction, split, import_entries)
                 self.matches.append([existing_entry, import_entry])
                 processed.add(existing_entry)
                 processed.add(import_entry)
@@ -426,9 +426,9 @@ class AccountPane:
         for import_entry in import_entries:
             append_entry(import_entry, True)
 
-        for (existing_entry, import_transaction, split_index), bound in self._user_binds.items():
+        for (existing_entry, import_transaction, split), bound in self._user_binds.items():
             if not bound:
-                import_entry = self._get_matching_entry(import_transaction, split_index, import_entries)
+                import_entry = self._get_matching_entry(import_transaction, split, import_entries)
                 match = [[e, i] for [e, i] in self.matches if
                          e and i and
                          (e, i) == (existing_entry, import_entry)]
@@ -478,37 +478,26 @@ class AccountPane:
         self.matches.sort(key=key_func)
 
     def _get_matching_key(self, entry):
-        return entry.transaction, self._get_split_index(entry)
+        return entry.split.uid
 
-    def _get_matching_entry(self, transaction, split_index, entries):
+    def _get_matching_entry(self, transaction, split, entries):
         for e in entries:
             if e.transaction is transaction:
-                e_split_index = self._get_split_index(e)
-                if e_split_index == split_index:
-                    import_entry = e
-                    break
+                for s in e.transaction.splits:
+                    if split.uid == s.uid:
+                        import_entry = e
+                        break
         return import_entry  # We want to raise an exception here if no entry exists
 
-    def _get_split_index(self, entry):
-        for index, split in enumerate(entry.transaction.splits):
-            if split is entry.split:
-                split_index = index
-                break
-        return split_index  # We want to raise an exception here if no split_index exists
-
     def bind(self, existing, imported):
-        # Only the reference to the original transaction is guarenteed to be retained
-        # after a cook, because of the way transaction.replicate() is used with
-        # the Document.change_transaction method.  So the only way to index back to
-        # the entry
-        split_index = self._get_split_index(imported)
-        self._user_binds[(existing, imported.transaction, split_index)] = True  # Bind
+        self._user_binds[(existing, imported.transaction, imported.split)] = True  # Bind
         self._convert_matches()
+        self._sort_matches()
 
     def unbind(self, existing, imported):
-        split_index = self._get_split_index(imported)
-        self._user_binds[(existing, imported.transaction, split_index)] = False  # Unbind
+        self._user_binds[(existing, imported.transaction, imported.split)] = False  # Unbind
         self._convert_matches()
+        self._sort_matches()
 
     @property
     def selected_target(self):
@@ -518,8 +507,8 @@ class AccountPane:
     def selected_target(self, value):
         if self._selected_target is value:
             return
-        print(self.name, value)
         self._selected_target = value
+        self._user_binds.clear()
         self._match_entries.clear()
         self.matches.clear()
         self.match_entries()
@@ -783,7 +772,7 @@ class ImportWindow(MainWindowGUIObject):
 
             for (e, ref) in matches:
                 for indx, s in enumerate(e.transaction.splits):
-                    if e.split is s:
+                    if e.split.uid == s.uid:
                         split_indx = indx
                         break
                 transaction = copy_transaction(e.transaction)

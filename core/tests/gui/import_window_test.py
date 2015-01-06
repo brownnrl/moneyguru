@@ -185,7 +185,7 @@ def test_swap_date_texts(app):
     eq_(app.iwin.swap_type_list[0], "MM/dd/yy --> dd/MM/yy")
     eq_(app.iwin.swap_type_list[1], "MM/dd/yy --> yy/dd/MM")
     eq_(app.iwin.swap_type_list[2], "MM/dd/yy --> MM/yy/dd")
-    eq_(len(app.iwin.swap_type_list), 5) # the 3 date swaps + description swap + amount invert
+    eq_(len(app.iwin.swap_type_list), 7) # the 3 date swaps + description swap + amount invert + bind similar + revert
 
 @with_app(app_import_checkbook_qif)
 def test_swap_date_texts_after_swap(app):

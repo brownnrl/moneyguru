@@ -10,6 +10,7 @@ import time
 from collections import defaultdict
 from copy import copy
 import datetime
+from uuid import uuid4
 
 from hscommon.util import allsame, first, nonone, stripfalse
 
@@ -52,9 +53,14 @@ class Transaction:
         #: This is useful for finding a mistake that we know was introduced recently.
         self.mtime = 0
         self._original = None
+        self._uid = uuid4().hex
 
     def __repr__(self):
-        return '<%s %r %r>' % (self.__class__.__name__, self.date, self.description)
+        return '<%s %r %r (%s)>' % (self.__class__.__name__, self.date, self.description, self.uid)
+
+    @property
+    def uid(self):
+        return self._uid
 
     @classmethod
     def from_transaction(cls, transaction):
@@ -487,9 +493,14 @@ class Split:
         #: Unique reference from an external source.
         self.reference = None
         self._original = None
+        self._uid = uuid4().hex
 
     def __repr__(self):
-        return '<Split %r %s>' % (self.account_name, self.amount)
+        return '<Split %r %s (%s)>' % (self.account_name, self.amount, self.uid)
+
+    @property
+    def uid(self):
+        return self._uid
 
     #--- Public
     def is_on_same_side(self, other_split):

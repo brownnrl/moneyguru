@@ -109,7 +109,7 @@ class Entry:
     @property
     def splits(self):
         """*readonly*. A list of all other splits in :attr:`transaction` except the one we wrap."""
-        return [x for x in self.split.transaction.splits if x is not self.split]
+        return [x for x in self.split.transaction.splits if x.uid != self.split.uid]
     
     @property
     def transaction(self):
@@ -146,13 +146,11 @@ class Entry:
 
     def original(self, attr):
         """Used in the import process, returns the original value."""
-        this_index = self.transaction.original.splits.index(self.split.original)
-        print(self.account, this_index, self.transfer)
         original_split = self.split.original
         if attr == 'transfer':
             original_splits = self.transaction.original.splits
-            other_splits = [original_splits[i] for i in range(len(original_splits))
-                            if i != this_index]
+            other_splits = [split for split in original_splits
+                            if split.uid != original_split.uid]
             return [split.account for split in other_splits if split.account is not None]
         if not hasattr(original_split, attr):
             return getattr(self.transaction.original, attr)
