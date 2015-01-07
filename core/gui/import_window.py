@@ -325,6 +325,36 @@ class BindSimilarPlugin(ImportActionPlugin, EquivalenceBind):
             for pane in panes:
                 match_entries(pane, pane.import_entries)
 
+
+
+class ExampleRuleAutofill(ImportActionPlugin):
+
+    NAME = "Example Rule Autofill Plugin"
+    ACTION_NAME = "Example Rule Autofill"
+
+    def perform_action(self, import_document, transactions, panes, selected_rows=None):
+
+        rules = [(lambda descr, i=i: descr.startswith('rule {}'.format(i)),
+                 'apply rule {}'.format(i)) for i in range(10)]
+
+        if selected_rows:
+            entries = [selected.imported for selected in selected_rows if selected.imported]
+        else:
+            entries = flatten([pane.import_entries for pane in panes])
+
+        for rule in rules:
+            for entry in entries:
+                if (not rule[0](entry.description) or
+                    len(entry.splits) != 1):
+                    continue
+
+                if entry.splits[0].account:
+                    continue
+
+                import_document.change_entry(entry, transfer=rule[1])
+
+
+
 EntryProbability = namedtuple('EntryProbability', 'existing imported probability')
 
 class AccountPane:
@@ -546,7 +576,8 @@ class ImportWindow(MainWindowGUIObject):
                                        SwapDescriptionPayeeAction(),
                                        InvertAmountsPlugin(),
                                        BindSimilarPlugin(),
-                                       RevertPlugin()]
+                                       RevertPlugin(),
+                                       ExampleRuleAutofill()]
         self._always_import_action_plugins = []
 
         self._bind_plugins = [EquivalenceBind(),
