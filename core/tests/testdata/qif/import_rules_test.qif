@@ -1,0 +1,40 @@
+!Account
+Nchecking
+B-3.00
+TBank
+^
+!Type:Bank
+D01/03/2015
+T1.00
+Mrule 1 checking
+^
+D01/03/2015
+T-5.00
+Mrule 2 checking
+^
+D01/03/2015
+T-17.00
+Mno rule checking
+^
+D01/03/2015
+T18.00
+Mrule 7 checking
+^
+!Account
+Nsavings
+B1.00
+TBank
+^
+!Type:Bank
+D01/03/2015
+T5.00
+Mrule 5 savings
+^
+D01/03/2015
+T-10.00
+Mrule 9 savings
+^
+D01/03/2015
+T6.00
+Mno rule savings
+^
