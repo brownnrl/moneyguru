@@ -498,6 +498,12 @@ class Split:
     def __repr__(self):
         return '<Split %r %s (%s)>' % (self.account_name, self.amount, self.uid)
 
+    def __eq__(self, other):
+        return self.uid == other.uid
+
+    def __hash__(self):
+        return hash(self.uid)
+
     @property
     def uid(self):
         return self._uid

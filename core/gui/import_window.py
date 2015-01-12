@@ -443,9 +443,13 @@ class AccountPane:
 
             processed.add(key)
 
-        for (existing_entry, import_transaction, split), bound in self._user_binds.items():
+        user_binds = self._user_binds.items()
+        for (existing_entry, import_entry), bound in user_binds:
+            new_import_entry = self._get_matching_entry(import_entry, import_entries)
+            if new_import_entry is None:
+                del self._user_binds[(existing_entry, import_entry)]
+                continue
             if bound:
-                import_entry = self._get_matching_entry(import_transaction, split, import_entries)
                 self.matches.append([existing_entry, import_entry])
                 processed.add(existing_entry)
                 processed.add(import_entry)
@@ -456,9 +460,9 @@ class AccountPane:
         for import_entry in import_entries:
             append_entry(import_entry, True)
 
-        for (existing_entry, import_transaction, split), bound in self._user_binds.items():
+        for (existing_entry, import_entry), bound in self._user_binds.items():
             if not bound:
-                import_entry = self._get_matching_entry(import_transaction, split, import_entries)
+                import_entry = self._get_matching_entry(import_entry, import_entries)
                 match = [[e, i] for [e, i] in self.matches if
                          e and i and
                          (e, i) == (existing_entry, import_entry)]
@@ -471,6 +475,12 @@ class AccountPane:
                     self.matches.append([e, None])
                 self.matches.append([None, i])
 
+    @staticmethod
+    def _get_matching_entry(entry, entry_list):
+        for e in entry_list:
+            if e == entry:
+                return e
+        return None
 
     def match_entries(self, binding_plugins=None, import_entries=None):
         self.account = self.import_document.accounts.find(self.name)
@@ -508,24 +518,15 @@ class AccountPane:
         self.matches.sort(key=key_func)
 
     def _get_matching_key(self, entry):
-        return entry.split.uid
-
-    def _get_matching_entry(self, transaction, split, entries):
-        for e in entries:
-            if e.transaction is transaction:
-                for s in e.transaction.splits:
-                    if split.uid == s.uid:
-                        import_entry = e
-                        break
-        return import_entry  # We want to raise an exception here if no entry exists
+        return entry
 
     def bind(self, existing, imported):
-        self._user_binds[(existing, imported.transaction, imported.split)] = True  # Bind
+        self._user_binds[(existing, imported)] = True  # Bind
         self._convert_matches()
         self._sort_matches()
 
     def unbind(self, existing, imported):
-        self._user_binds[(existing, imported.transaction, imported.split)] = False  # Unbind
+        self._user_binds[(existing, imported)] = False  # Unbind
         self._convert_matches()
         self._sort_matches()
 
