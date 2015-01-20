@@ -7,6 +7,7 @@
 # http://www.hardcoded.net/licenses/bsd_license
 
 from datetime import date
+from itertools import cycle
 
 from hscommon.testutil import eq_
 
@@ -184,7 +185,7 @@ def test_swap_date_texts(app):
     eq_(app.iwin.swap_type_list[0], "MM/dd/yy --> dd/MM/yy")
     eq_(app.iwin.swap_type_list[1], "MM/dd/yy --> yy/dd/MM")
     eq_(app.iwin.swap_type_list[2], "MM/dd/yy --> MM/yy/dd")
-    eq_(len(app.iwin.swap_type_list), 5) # the 3 date swaps + description swap + amount invert
+    eq_(len(app.iwin.swap_type_list), 6) # the 3 date swaps + description swap + amount invert + transfer autofill
 
 @with_app(app_import_checkbook_qif)
 def test_swap_date_texts_after_swap(app):
@@ -377,6 +378,7 @@ HIGH_YEAR_FIELDS = [
     {'date': '13/01/1999', 'amount': '1'},
 ]
 
+
 #---
 def app_import_txns_with_low_day_fields():
     app = TestApp()
@@ -413,9 +415,6 @@ def test_switch_day_year(app):
     eq_(app.itable[0].date_import, '09/02/2001')
     eq_(app.itable[1].date_import, '08/11/2005')
     eq_(app.itable[2].date_import, '09/01/2012')
-
-
-
 
 #---
 def app_import_txns_with_high_day_fields():
@@ -678,3 +677,44 @@ def test_switch_transfer_accounts(app):
     eq_(app.itable[0].transfer_import, 'checking')
     eq_(app.itable[1].transfer_import, 'checking')
     eq_(app.itable[2].transfer_import, 'GAS')
+
+def app_with_known_simple_token_transfers():
+
+    app = app_with_plugins([ChangeTransfer])
+    app.add_account('checking')
+    tokens = 'abcdefghijklmnopqrstuvwxyz'
+    accounts = ['acc%02d' % (i,) for i in range(1, 27)]
+    account_cycle = cycle(accounts)
+    token_cycle = cycle(tokens)
+    txns = []
+
+
+    for i in range(26):
+        txns.append({'date': '01/01/2014',
+                     'description': next(token_cycle),
+                     'transfer': next(account_cycle),
+                     'amount': '0.00'})
+
+    app.fake_import('checking', txns)
+    app.iwin.selected_target_account_index = 1
+
+    app.iwin.import_selected_pane()
+
+    txns.clear()
+
+    for i in range(26):
+        txns.append({'date': '01/02/2014',
+                     'description': next(token_cycle),
+                     'amount': '0.00'})
+
+    app.fake_import('checking', txns)
+    app.iwin.selected_target_account_index = 1
+
+    return app
+
+@with_app(app_with_known_simple_token_transfers)
+def test_simple_map(app):
+    app.iwin.swap_type_list.select(SwapType.TransferAutofill)
+    app.iwin.perform_swap(apply=False)
+    for i in range(26, 26*2):
+        eq_(app.itable[i].transfer_import, app.itable[i-26].entry.transfer[0].name)

@@ -41,6 +41,7 @@ class SwapType:
     DayYear = 2
     DescriptionPayee = 3
     InvertAmount = 4
+    TransferAutofill = 5
 
 
 class ActionSelectionOptions:
@@ -216,6 +217,49 @@ class ReferenceBind(ImportBindPlugin):
 
 
         return matches
+
+
+class TransferAutofill(ImportActionPlugin):
+
+    ACTION_NAME = "Transfer Autofill"
+    NAME = "Intelligent Import Transfer Autofill"
+
+    def can_perform_action(self, import_document, transactions, panes, selected_rows=None):
+        return len(panes) == 1 and panes[0].selected_target # We can only perform on the target account.
+
+    def perform_action(self, import_document, transactions, panes, selected_rows=None):
+        if not self.can_perform_action(import_document, transactions, panes):
+            return
+
+        selected_pane = panes[0]
+        selected_target = selected_pane.selected_target
+
+        transactions = dedupe([entry.transaction for entry in selected_target.entries])
+
+        token_count = defaultdict(lambda: defaultdict(lambda: 0))
+        for txn in transactions:
+            froms, tos = txn.splitted_splits()
+            if len(tos) != 1 or not tos[0].account or not tos[0].account.name:
+                continue
+
+            to_account_name = tos[0].account.name
+
+            for token in txn.description.split(' '):
+                token_count[token][to_account_name] += 1
+
+        total_tokens = len(token_count)
+
+
+        # build probabilities...
+
+        for entry in selected_pane.import_entries:
+            if entry.transfer == []:
+                # select the most likely candidate...
+                pass
+
+
+
+
 
 
 class AccountPane:
@@ -439,7 +483,8 @@ class ImportWindow(MainWindowGUIObject):
                                        SwapMonthYear(),
                                        SwapDayYear(),
                                        SwapDescriptionPayeeAction(),
-                                       InvertAmountsPlugin()]
+                                       InvertAmountsPlugin(),
+                                       TransferAutofill()]
         self._always_import_action_plugins = []
 
         self._import_action_listeners = []
