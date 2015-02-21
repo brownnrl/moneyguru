@@ -352,7 +352,7 @@ class AccountPane:
 
             processed.add(key)
 
-        user_binds = self._user_binds.items()
+        user_binds = list(self._user_binds.items())
         for (existing_entry, import_entry), bound in user_binds:
             new_import_entry = self._get_matching_entry(import_entry, import_entries)
             if new_import_entry is None:
@@ -489,7 +489,7 @@ class ImportWindow(MainWindowGUIObject):
 
         self._import_action_listeners = []
         self._add_plugin_listeners(self._import_action_plugins)
-        self._recieve_plugins(self.app.plugins)
+        self._receive_plugins(self.app.plugins)
 
         def setfunc(index):
             self.view.set_swap_button_enabled(self.can_perform_swap())
@@ -617,7 +617,7 @@ class ImportWindow(MainWindowGUIObject):
         self.view.update_selected_pane()
         self.view.set_swap_button_enabled(self.can_perform_swap())
 
-    def _recieve_plugins(self, plugins):
+    def _receive_plugins(self, plugins):
         extended_plugins = [plugin() for plugin in plugins
                             if issubclass(plugin, ImportActionPlugin)]
 
@@ -712,7 +712,7 @@ class ImportWindow(MainWindowGUIObject):
 
             for (e, ref) in matches:
                 for indx, s in enumerate(e.transaction.splits):
-                    if e.split.uid == s.uid:
+                    if e.split is s:
                         split_indx = indx
                         break
                 transaction = copy_transaction(e.transaction)
