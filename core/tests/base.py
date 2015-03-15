@@ -1,10 +1,10 @@
 # Created By: Virgil Dupras
 # Created On: 2009-06-04
-# Copyright 2014 Hardcoded Software (http://www.hardcoded.net)
-#
-# This software is licensed under the "BSD" License as described in the "LICENSE" file,
-# which should be included with this package. The terms are also available at
-# http://www.hardcoded.net/licenses/bsd_license
+# Copyright 2015 Hardcoded Software (http://www.hardcoded.net)
+# 
+# This software is licensed under the "GPLv3" License as described in the "LICENSE" file, 
+# which should be included with this package. The terms are also available at 
+# http://www.gnu.org/licenses/gpl-3.0.html
 
 import os.path as op
 from datetime import date
@@ -501,13 +501,7 @@ class TestApp(TestAppBase):
 
     def transaction_descriptions(self):
         return [row.description for row in self.ttable.rows]
-
-    def set_plugins(self, plugins):
-        # Changes the list of currently active plugins in `self.app` to `plugins`.
-        self.app.plugins = plugins
-        self.app._hook_currency_plugins()
-        self.iwin._receive_plugins(plugins)
-
+    
     #--- Shortcut for selecting a view type.
     def current_view(self):
         return self.mw.pane_view(self.mw.current_pane_index)
@@ -696,3 +690,9 @@ def print_table(table, extra_attrs=[]):
         print('|'.join(getval(row, attrname) for attrname in attrs))
     print("--- Row Count: {} ---".format(len(table)))
 
+def app_with_plugins(plugins):
+    class CustomPluginsApp(Application):
+        def _load_plugins(self, plugin_path):
+            self.plugins = plugins
+
+    return TestApp(app=CustomPluginsApp(ApplicationGUI()))

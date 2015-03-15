@@ -1,10 +1,10 @@
 # Created By: Virgil Dupras
 # Created On: 2008-08-08
-# Copyright 2014 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2015 Hardcoded Software (http://www.hardcoded.net)
 # 
-# This software is licensed under the "BSD" License as described in the "LICENSE" file, 
+# This software is licensed under the "GPLv3" License as described in the "LICENSE" file, 
 # which should be included with this package. The terms are also available at 
-# http://www.hardcoded.net/licenses/bsd_license
+# http://www.gnu.org/licenses/gpl-3.0.html
 
 from hscommon.trans import trget
 from hscommon.gui.column import Column
@@ -33,7 +33,7 @@ class ImportTable(GUITable, TransactionSelectionMixin):
         GUITable.__init__(self, document=import_window.document)
         self.window = import_window
         self._is_two_sided = False
-        self._explicitly_selected_transactions = []
+        self.__last_explicitly_selected = []
     
     #--- Override
     def select_transactions(self, transactions):
@@ -49,8 +49,12 @@ class ImportTable(GUITable, TransactionSelectionMixin):
         return [row.imported.transaction if row.imported
                 else row.entry.transaction for row in self.selected_rows]
 
+    @property
+    def _explicitly_selected_transactions(self):
+        return self.__last_explicitly_selected
+
     def _update_selection(self):
-        self._explicitly_selected_transactions = self.selected_transactions
+        self.__last_explicitly_selected = self.selected_transactions
 
     def _fill(self):
         self._is_two_sided = False
