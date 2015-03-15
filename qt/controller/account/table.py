@@ -1,10 +1,10 @@
 # Created By: Virgil Dupras
 # Created On: 2009-11-01
-# Copyright 2014 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2015 Hardcoded Software (http://www.hardcoded.net)
 #
-# This software is licensed under the "BSD" License as described in the "LICENSE" file,
+# This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
-# http://www.hardcoded.net/licenses/bsd_license
+# http://www.gnu.org/licenses/gpl-3.0.html
 
 from PyQt4.QtCore import Qt
 from PyQt4.QtGui import QPixmap
@@ -54,7 +54,6 @@ class EntryTable(TableWithTransactions):
         self.tableDelegate = EntryTableDelegate(self.model)
         self.view.setItemDelegate(self.tableDelegate)
         self.view.sortByColumn(1, Qt.AscendingOrder) # sorted by date by default
-        self.view.clicked.connect(self.cellClicked)
         self.view.spacePressed.connect(self.model.toggle_reconciled)
         self.view.deletePressed.connect(self.model.delete)
 
@@ -72,7 +71,7 @@ class EntryTable(TableWithTransactions):
     def _getFlags(self, row, column):
         flags = TableWithTransactions._getFlags(self, row, column)
         if column.name == 'status':
-            if row.can_reconcile() and not row.reconciled:
+            if row.can_reconcile():
                 flags |= Qt.ItemIsUserCheckable
         return flags
 
@@ -80,18 +79,11 @@ class EntryTable(TableWithTransactions):
         if column.name == 'status':
             if role == Qt.CheckStateRole:
                 row.toggle_reconciled()
+                self._overrideNextSelectionUpdate()
                 return True
             else:
                 return False
         else:
             return TableWithTransactions._setData(self, row, column, value, role)
 
-    #--- Event Handling
-    def cellClicked(self, index):
-        column = self.model.columns.column_by_index(index.column())
-        rowattr = column.name
-        if rowattr == 'status':
-            row = self.model[index.row()]
-            if row.can_reconcile() and row.reconciled:
-                row.toggle_reconciled()
 
