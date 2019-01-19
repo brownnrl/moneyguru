@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -6,23 +6,18 @@
 
 import os
 import os.path as op
-import datetime
-import threading
-from collections import namedtuple
 import re
 
-from core.notify import Broadcaster
 from core.util import nonone
 
 from .gui.date_widget import DateWidget
 
 from . import __version__
-from .const import DATE_FORMAT_FOR_PREFERENCES
 from .model import currency
 from .model.amount import parse_amount, format_amount
 from .model.currency import Currencies
+from .model.currency_provider import get_providers
 from .model.date import parse_date, format_date
-from .plugin import CurrencyProviderPlugin, get_all_core_plugin_modules, get_plugins_from_mod
 
 class PreferenceNames:
     """Holds a list of preference key constants used in moneyGuru.
@@ -37,30 +32,7 @@ class PreferenceNames:
     AutoSaveInterval = 'AutoSaveInterval'
     AutoDecimalPlace = 'AutoDecimalPlace'
     DayFirstDateEntry = 'DayFirstDateEntry'
-    CustomRanges = 'CustomRanges'
     ShowScheduleScopeDialog = 'ShowScheduleScopeDialog'
-    DisabledCorePlugins = 'DisabledCorePlugins'
-    EnabledUserPlugins = 'EnabledUserPlugins'
-
-# http://stackoverflow.com/questions/1606436/adding-docstrings-to-namedtuples-in-python
-class SavedCustomRange(namedtuple('SavedCustomRange', 'name start end')):
-    """*namedtuple*. Holds attributes for moneyGuru's saved custom date ranges.
-
-    .. seealso:: :class:`core.model.date.CustomDateRange`
-
-    .. attribute:: name
-
-        Name of the range
-
-    .. attribute:: start
-
-        *date*. Start of the range
-
-    .. attribute:: end
-
-        *date*. End of the range
-    """
-    __slots__ = ()
 
 class ApplicationView:
     """Expected interface for :class:`Application`'s view.
@@ -99,16 +71,12 @@ class ApplicationView:
     def reveal_path(self, path):
         """Open ``path`` with the system's default file explorer."""
 
-class Application(Broadcaster):
+class Application:
     """Manage a running instance of moneyGuru.
 
     Mostly, it handles app-wide user preferences. It doesn't hold a reference to a list of open
     :class:`.Document` instances. These instances are auto-sufficient and their reference are held
     directly by the UI layer.
-
-    However, opened document, as :class:`.Listener` subclasses, listen to our app instance, which
-    is a :class:`.Broadcaster` for a couple of app-wide events, such as ``must_autosave`` and
-    ``saved_custom_ranges_changed``.
 
     But otherwise, it acts as an app-wide preference repository. As such, it provides useful
     utilities, such as :meth:`format_amount`, :meth:`format_date`, :meth:`parse_amount` and
@@ -130,9 +98,6 @@ class Application(Broadcaster):
     :param str cache_path: The path (a folder) in which we put our "cache" stuff, that is, the
                            SQLite currency rate cache DB and autosaved files. If ``None``, the
                            currency cache will be in-memory and autosaves will not happen.
-    :param str appdata_path: Path in which we put user-specific files we need for moneyGuru to work
-                             well, but that don't qualify as "cache". For now, it's where we put
-                             the plugins. If ``None``, plugins are disabled.
     """
 
     APP_NAME = "moneyGuru"
@@ -142,8 +107,7 @@ class Application(Broadcaster):
 
     def __init__(
             self, view, date_format='dd/MM/yyyy', decimal_sep='.', grouping_sep='',
-            default_currency='USD', cache_path=None, appdata_path=None):
-        Broadcaster.__init__(self)
+            default_currency='USD', cache_path=None):
         self.view = view
         self.cache_path = cache_path
         # cache_path is required, but for tests, we don't want to bother specifying it. When
@@ -154,9 +118,6 @@ class Application(Broadcaster):
             db_path = op.join(cache_path, 'currency.db')
         else:
             db_path = ':memory:'
-        self.appdata_path = appdata_path
-        if appdata_path and not op.exists(appdata_path):
-            os.makedirs(appdata_path)
         currency.initialize_db(db_path)
         self.is_first_run = not self.get_default(PreferenceNames.HadFirstLaunch, False)
         if self.is_first_run:
@@ -165,81 +126,20 @@ class Application(Broadcaster):
         self._date_format = date_format
         self._decimal_sep = decimal_sep
         self._grouping_sep = grouping_sep
-        self._autosave_timer = None
         self._autosave_interval = self.get_default(PreferenceNames.AutoSaveInterval, 10)
         self._auto_decimal_place = self.get_default(PreferenceNames.AutoDecimalPlace, False)
         self._day_first_date_entry = self.get_default(PreferenceNames.DayFirstDateEntry, True)
         self._show_schedule_scope_dialog = self.get_default(PreferenceNames.ShowScheduleScopeDialog, True)
-        self.saved_custom_ranges = [None] * 3
-        self._load_custom_ranges()
-        self.plugins = []
-        # Plugins with ENABLED_BY_DEFAULT = True are implicitly enabled and must be explicitly
-        # disabled.
-        self._disabled_plugins = set(self.get_default(PreferenceNames.DisabledCorePlugins, []))
-        # User plugins are disabled by default.
-        self._enabled_plugins = set(self.get_default(PreferenceNames.EnabledUserPlugins, []))
-        self._load_core_plugins()
-        self._hook_currency_plugins()
-        self._update_autosave_timer()
+        self._hook_currency_providers()
         self._update_date_entry_order()
 
     # --- Private
-    def _autosave_all_documents(self):
-        self.notify('must_autosave')
-        self._update_autosave_timer()
-
-    def _update_autosave_timer(self):
-        if self._autosave_timer is not None:
-            self._autosave_timer.cancel()
-        if self._autosave_interval > 0 and self.cache_path: # no need to start a timer if we have nowhere to autosave to
-            # By having the timer at the application level, we make sure that there will not be 2
-            # documents trying to autosave at the same time, thus overwriting each other.
-            self._autosave_timer = threading.Timer(self._autosave_interval * 60, self._autosave_all_documents)
-            self._autosave_timer.start()
-        else:
-            self._autosave_timer = None
-
     def _update_date_entry_order(self):
         DateWidget.setDMYEntryOrder(self._day_first_date_entry)
 
-    def _load_custom_ranges(self):
-        custom_ranges = self.get_default(PreferenceNames.CustomRanges)
-        if not custom_ranges:
-            return
-        for index, custom_range in enumerate(custom_ranges):
-            if custom_range:
-                name = custom_range[0]
-                start = datetime.datetime.strptime(custom_range[1], DATE_FORMAT_FOR_PREFERENCES).date()
-                end = datetime.datetime.strptime(custom_range[2], DATE_FORMAT_FOR_PREFERENCES).date()
-                self.saved_custom_ranges[index] = SavedCustomRange(name, start, end)
-            else:
-                self.saved_custom_ranges[index] = None
-
-    def _load_plugin_module(self, plugin_module):
-        for x in get_plugins_from_mod(plugin_module):
-            if all(p.NAME != x.NAME for p in self.plugins):
-                self.plugins.append(x)
-
-    def _load_core_plugins(self):
-        for mod in get_all_core_plugin_modules():
-            self._load_plugin_module(mod)
-
-    def _hook_currency_plugins(self):
-        currency_plugins = [p for p in self.get_enabled_plugins() if issubclass(p, CurrencyProviderPlugin)]
-        for p in currency_plugins:
+    def _hook_currency_providers(self):
+        for p in get_providers():
             Currencies.get_rates_db().register_rate_provider(p().wrapped_get_currency_rates)
-
-    def _save_custom_ranges(self):
-        custom_ranges = []
-        for custom_range in self.saved_custom_ranges:
-            if custom_range:
-                start_str = custom_range.start.strftime(DATE_FORMAT_FOR_PREFERENCES)
-                end_str = custom_range.end.strftime(DATE_FORMAT_FOR_PREFERENCES)
-                custom_ranges.append([custom_range.name, start_str, end_str])
-            else:
-                # We can't insert None in arrays for preferences
-                custom_ranges.append([])
-        self.set_default(PreferenceNames.CustomRanges, custom_ranges)
 
     # --- Public
     def format_amount(self, amount, **kw):
@@ -306,59 +206,6 @@ class Application(Broadcaster):
                 query[qtype] = qargs
         return query
 
-    def save_custom_range(self, slot, name, start, end):
-        """Save a custom date range into our preferences.
-
-        This will notify the UI to refresh the date range selector.
-
-        :param int slot: The slot number (0-2) to save this range into.
-        :param str name: A name for the range.
-        :param datetime.date start: Start of the range.
-        :param datetime.date end: End of the range.
-        """
-        self.saved_custom_ranges[slot] = SavedCustomRange(name, start, end)
-        self._save_custom_ranges()
-        self.notify('saved_custom_ranges_changed')
-
-    def open_plugin_folder(self):
-        """Open the plugin folder in the user's file explorer."""
-        plpath = op.join(self.appdata_path, 'moneyguru_plugins')
-        self.view.reveal_path(plpath)
-
-    def shutdown(self):
-        """Shutdown the app before closing.
-
-        For now, the only thing it does is to stop the autosave timer to insure that there isn't
-        going to be an autosave being called for at a wrong moment.
-        """
-        self._autosave_interval = 0
-        self._update_autosave_timer()
-
-    def get_enabled_plugins(self):
-        return [p for p in self.plugins if self.is_plugin_enabled(p)]
-
-    def is_plugin_enabled(self, plugin):
-        pid = plugin.plugin_id()
-        if plugin.is_core() and plugin.ENABLED_BY_DEFAULT:
-            return pid not in self._disabled_plugins
-        else:
-            return pid in self._enabled_plugins
-
-    def set_plugin_enabled(self, plugin, enabled):
-        pid = plugin.plugin_id()
-        if plugin.is_core() and plugin.ENABLED_BY_DEFAULT:
-            if enabled:
-                self._disabled_plugins.discard(pid)
-            else:
-                self._disabled_plugins.add(pid)
-            self.set_default(PreferenceNames.DisabledCorePlugins, list(self._disabled_plugins))
-        else:
-            if enabled:
-                self._enabled_plugins.add(pid)
-            else:
-                self._enabled_plugins.discard(pid)
-            self.set_default(PreferenceNames.EnabledUserPlugins, list(self._enabled_plugins))
-
     def get_default(self, key, fallback_value=None):
         """Returns moneyGuru user pref for ``key``.
 
@@ -405,7 +252,6 @@ class Application(Broadcaster):
             return
         self._autosave_interval = value
         self.set_default(PreferenceNames.AutoSaveInterval, value)
-        self._update_autosave_timer()
 
     @property
     def auto_decimal_place(self):

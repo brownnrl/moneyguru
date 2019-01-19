@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -6,7 +6,7 @@
 
 import datetime
 
-from .base import ViewChild, MESSAGES_DOCUMENT_CHANGED
+from .base import ViewChild
 from .table import GUITable, TableWithAmountMixin
 from .completable_edit import CompletableEdit
 
@@ -59,14 +59,21 @@ class TransactionSelectionMixin:
 class TransactionTableBase(GUITable, ViewChild, TransactionSelectionMixin, TableWithAmountMixin):
     """Common superclass for TransactionTable and EntryTable, which share a lot of logic.
     """
-    INVALIDATING_MESSAGES = MESSAGES_DOCUMENT_CHANGED | {'filter_applied', 'date_range_changed'}
 
     def __init__(self, parent_view):
-        ViewChild.__init__(self, parent_view)
         GUITable.__init__(self, document=parent_view.document)
+        ViewChild.__init__(self, parent_view)
+        self.parent_view = parent_view
+        self.mainwindow = parent_view.mainwindow
+        self.document = self.mainwindow.document
+        self.app = self.document.app
+        self._invalidated = True
         self.completable_edit = CompletableEdit(parent_view.mainwindow)
 
     # --- Override
+    def _do_restore_view(self):
+        self.columns.restore_columns()
+
     def _is_edited_new(self):
         return self.edited.transaction not in self.document.transactions
 
@@ -85,6 +92,7 @@ class TransactionTableBase(GUITable, ViewChild, TransactionSelectionMixin, Table
 
     def _revalidate(self):
         self.refresh()
+        self._invalidated = False
 
     def save_edits(self):
         if self.edited is None and len(self.selected_indexes) == 1:
@@ -96,10 +104,12 @@ class TransactionTableBase(GUITable, ViewChild, TransactionSelectionMixin, Table
                 txn = row.transaction
                 if txn.is_spawn and txn.date <= datetime.date.today():
                     self.document.materialize_spawn(txn)
+                    self.mainwindow.revalidate()
         super().save_edits()
 
     def show(self):
-        ViewChild.show(self)
+        if self._invalidated:
+            self._revalidate()
         self._restore_from_explicit_selection()
         self.mainwindow.selected_transactions = self.selected_transactions
         self.view.show_selected_row()
@@ -128,6 +138,7 @@ class TransactionTableBase(GUITable, ViewChild, TransactionSelectionMixin, Table
 
     def duplicate_selected(self):
         self.document.duplicate_transactions(self.selected_transactions)
+        self.mainwindow.revalidate()
 
     def move(self, row_indexes, to_index):
         try:
@@ -138,6 +149,7 @@ class TransactionTableBase(GUITable, ViewChild, TransactionSelectionMixin, Table
         # we can use any from_index, let's use the first
         transactions = [self[index].transaction for index in row_indexes]
         self.document.move_transactions(transactions, to_transaction)
+        self.mainwindow.revalidate()
 
     def move_down(self):
         """Moves the selected entry down one slot if possible"""
@@ -154,9 +166,3 @@ class TransactionTableBase(GUITable, ViewChild, TransactionSelectionMixin, Table
         position = self.selected_indexes[0] - 1
         if self.can_move(self.selected_indexes, position):
             self.move(self.selected_indexes, position)
-
-    # --- Event Handlers
-    filter_applied = GUITable._filter_applied
-    transaction_changed = GUITable._item_changed
-    transaction_deleted = GUITable._item_deleted
-

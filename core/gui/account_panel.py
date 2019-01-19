@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -10,7 +10,7 @@ from core.trans import tr
 
 from ..model.account import AccountType
 from ..model.currency import Currencies
-from .base import MainWindowPanel
+from .base import GUIPanel
 from .selectable_list import GUISelectableList, LinkedSelectableList
 
 ACCOUNT_TYPE_DESC = {
@@ -39,15 +39,15 @@ class AccountTypeList(GUISelectableList):
         selected_type = AccountType.InOrder[self.selected_index]
         self.panel.type = selected_type
 
-class AccountPanel(MainWindowPanel):
+class AccountPanel(GUIPanel):
     """Modal dialog letting the user edit the properties of an account.
 
     Our dialog is loaded up with an :class:`.Account`, which is then written to upon saving.
 
-    Subclasses :class:`.MainWindowPanel`.
+    Subclasses :class:`.GUIPanel`.
     """
     def __init__(self, mainwindow):
-        MainWindowPanel.__init__(self, mainwindow)
+        GUIPanel.__init__(self, mainwindow)
         self._init_fields()
         self_proxy = weakref.proxy(self)
         self.type_list = AccountTypeList(self_proxy)
@@ -62,7 +62,7 @@ class AccountPanel(MainWindowPanel):
 
     # --- Override
     def _load(self, account):
-        self.document.stop_edition()
+        self.mainwindow.stop_editing()
         self._init_fields()
         self.name = account.name
         self.type = account.type
@@ -87,6 +87,7 @@ class AccountPanel(MainWindowPanel):
         if self.can_change_currency:
             kwargs['currency'] = self.currency
         self.document.change_accounts([self.account], **kwargs)
+        self.mainwindow.revalidate()
 
     # --- Private
     def _init_fields(self):

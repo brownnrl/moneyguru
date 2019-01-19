@@ -220,6 +220,7 @@ class EntryTableRow(BaseEntryTableRow):
             if self._transfer != oldvalue:
                 changed_fields['transfer'] = self._transfer
         self.table.document.change_entry(entry, **changed_fields)
+        self.table.mainwindow.revalidate()
         self.load()
 
     def toggle_reconciled(self):
@@ -368,6 +369,7 @@ class EntryTableBase(TransactionTableBase):
         entries = self.selected_entries
         if entries:
             self.document.delete_entries(entries)
+            self.mainwindow.revalidate()
 
     def add(self):
         if self._get_current_account() is not None:

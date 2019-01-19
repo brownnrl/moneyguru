@@ -1,6 +1,4 @@
-# Created By: Eric Mc Sween
-# Created On: 2007-12-12
-# Copyright 2015 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -10,6 +8,7 @@ import re
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 
+from core.model._ccore import inc_date
 from core.trans import tr
 from core.util import iterdaterange
 
@@ -82,20 +81,6 @@ class DateRange:
     def __hash__(self):
         return hash((self.start, self.end))
 
-    def adjusted(self, new_date):
-        """Kinda like :meth:`around`, but it can possibly enlarge the range.
-
-        Returns ``None`` if ``new_date`` doesn't trigger any adjustments.
-
-        To be frank, that method is there only for :class:`AllTransactionsRange`. When we add a new
-        transaction, we call this method to possibly enlarge/reposition the range. If it isn't
-        changed, we don't want to trigger all UI updated related to a date range adjustment, so we
-        return ``None`` to mean "nope, nothing happened here" (which is most of the time).
-
-        If it's changed, we return the new range.
-        """
-        return None
-
     def around(self, date):
         """Returns a date range of the same type as ``self`` that contains ``new_date``.
 
@@ -124,6 +109,16 @@ class DateRange:
         navigable, can return a meaningful result here, like :class:`YearToDateRange`, which can
         return the same period last year. Others, like :class:`AllTransactionsRange`, have nothing
         to return, so they return an empty range.
+        """
+        return self
+
+    def with_new_args(self, **kwargs):
+        """Returns the date range with new args ``kwargs``.
+
+        If args aren't applicable or if they haven't changed, return an
+        unchanged ``self``.
+
+        We have two args: ``year_start_month`` and ``ahead_months``.
         """
         return self
 
@@ -172,12 +167,6 @@ class NavigableDateRange(DateRange):
 
     Subclasses :class:`DateRange`.
     """
-    def adjusted(self, new_date):
-        result = self.around(new_date)
-        if result == self:
-            result = None
-        return result
-
     def around(self, date):
         return type(self)(date)
 
@@ -267,17 +256,28 @@ class YearRange(NavigableDateRange):
         if seed.month < year_start_month:
             year -= 1
         start = date(year, year_start_month, 1)
-        end = inc_year(start, 1) - ONE_DAY
+        end = inc_date(start, RepeatType.Yearly, 1) - ONE_DAY
         DateRange.__init__(self, start, end)
 
     def around(self, date):
         return type(self)(date, year_start_month=self.start.month)
 
     def next(self):
-        return YearRange(inc_year(self.start, 1), year_start_month=self.start.month)
+        return YearRange(inc_date(self.start, RepeatType.Yearly, 1), year_start_month=self.start.month)
 
     def prev(self):
-        return YearRange(inc_year(self.start, -1), year_start_month=self.start.month)
+        return YearRange(inc_date(self.start, RepeatType.Yearly, -1), year_start_month=self.start.month)
+
+    def with_new_args(self, year_start_month=None, **kwargs):
+        if year_start_month is not None and year_start_month != self.start.month:
+            today = date.today()
+            if today in self:
+                seed = today
+            else:
+                seed = self.start
+            return type(self)(seed, year_start_month=year_start_month)
+        else:
+            return self
 
     @property
     def display(self):
@@ -304,9 +304,15 @@ class YearToDateRange(DateRange):
         DateRange.__init__(self, start, end)
 
     def prev(self):
-        start = inc_year(self.start, -1)
-        end = inc_year(self.end, -1)
+        start = inc_date(self.start, RepeatType.Yearly, -1)
+        end = inc_date(self.end, RepeatType.Yearly, -1)
         return DateRange(start, end)
+
+    def with_new_args(self, year_start_month=None, **kwargs):
+        if year_start_month is not None and year_start_month != self.start.month:
+            return type(self)(year_start_month=year_start_month)
+        else:
+            return self
 
     @property
     def display(self):
@@ -343,13 +349,20 @@ class RunningYearRange(DateRange):
         end_plus_one = end + ONE_DAY
         start = end_plus_one.replace(year=end_plus_one.year-1)
         if start.day != 1:
-            start = inc_month(start, 1).replace(day=1)
+            start = inc_date(start, RepeatType.Monthly, 1).replace(day=1)
         DateRange.__init__(self, start, end)
+        self.ahead_months = ahead_months
 
     def prev(self):
         start = self.start.replace(year=self.start.year - 1)
         end = self.start - ONE_DAY
         return DateRange(start, end)
+
+    def with_new_args(self, ahead_months=None, **kwargs):
+        if ahead_months is not None and ahead_months != self.ahead_months:
+            return type(self)(ahead_months)
+        else:
+            return self
 
     @property
     def display(self):
@@ -370,19 +383,25 @@ class AllTransactionsRange(DateRange):
         DateRange.__init__(self, start, end)
         self.ahead_months = ahead_months
 
-    def adjusted(self, new_date):
-        first_date = min(self.start, new_date)
-        last_date = max(self.end, new_date)
+    def around(self, date):
+        first_date = min(self.start, date)
+        last_date = max(self.end, date)
         result = AllTransactionsRange(
             first_date=first_date, last_date=last_date, ahead_months=self.ahead_months
         )
         if result == self:
-            result = None
+            result = self
         return result
 
     def prev(self):
         start = self.start - ONE_DAY
         return DateRange(start, start) # whatever, as long as there's nothing in it
+
+    def with_new_args(self, ahead_months=None, **kwargs):
+        if ahead_months is not None and ahead_months != self.ahead_months:
+            return type(self)(self.start, self.end, ahead_months)
+        else:
+            return self
 
     @property
     def display(self):
@@ -411,81 +430,23 @@ class CustomDateRange(DateRange):
 
 # --- Date Incrementing
 
-def inc_day(date, count):
-    """Increments ``date`` by ``count`` days.
+class RepeatType:
+    """Available repetition types for :class:`Recurrence`.
 
-    ``count`` can be negative.
+    * ``Daily``
+    * ``Weekly``
+    * ``Monthly``
+    * ``Yearly``
+    * ``Weekday`` (every 2nd friday of the month)
+    * ``WeekdayLast`` (every last friday of the month)
     """
-    return date + timedelta(count)
-
-def inc_week(date, count):
-    """Increments ``date`` by ``count * 7`` days.
-
-    ``count`` can be negative.
-    """
-    return inc_day(date, count * 7)
-
-def inc_month(date, count):
-    """Increments ``date`` by ``count`` months.
-
-    That is, we'll end up with a date on the same day of a different month. If that's impossible
-    (31st incrementing in a 30-days month), the day will be the last of the month.
-
-    ``count`` can be negative.
-    """
-    y, m, d = date.year, date.month, date.day
-    m += count
-    y += (m - 1) // 12
-    m = ((m - 1) % 12) + 1
-    days_in_month = monthrange(y, m)[1]
-    d = min(d, days_in_month)
-    return date.replace(year=y, month=m, day=d)
-
-def inc_year(date, count):
-    """Increments ``date`` by ``count * 12`` months.
-
-    ``count`` can be negative.
-    """
-    return inc_month(date, count * 12)
-
-def inc_weekday_in_month(date, count):
-    """Increments ``date`` by ``count`` months, preserving weekday.
-
-    For example, if ``date`` is the 2nd friday of its month, then the result will be the 2nd friday
-    of ``count`` months later.
-
-    ``count`` can be negative.
-
-    If the result doesn't exist, returns ``None``.
-    """
-    weekday = date.weekday()
-    weekno = (date.day - 1) // 7
-    new_month = inc_month(date, count)
-    first_weekday = new_month.replace(day=1).weekday()
-    diff = weekday - first_weekday
-    if diff < 0:
-        diff += 7
-    try:
-        return new_month.replace(day=weekno * 7 + diff + 1)
-    except ValueError:
-        return None
-
-def inc_last_weekday_in_month(date, count):
-    """Increments ``date`` by ``count`` months, preserving weekday, returning the last.
-
-    For example, if ``date`` is a friday, then the result will be the last friday of ``count``
-    months later.
-
-    ``count`` can be negative.
-    """
-    weekday = date.weekday()
-    new_month = inc_month(date, count)
-    days_in_month = monthrange(new_month.year, new_month.month)[1]
-    last_weekday = new_month.replace(day=days_in_month).weekday()
-    diff = last_weekday - weekday
-    if diff < 0:
-        diff += 7
-    return new_month.replace(day=days_in_month - diff)
+    Daily = 'daily'
+    Weekly = 'weekly'
+    Monthly = 'monthly'
+    Yearly = 'yearly'
+    Weekday = 'weekday'
+    WeekdayLast = 'weekday_last'
+    ALL = {Daily, Weekly, Monthly, Yearly, Weekday, WeekdayLast}
 
 # --- Date Formatting
 # For the functions below, the format used is a subset of the Unicode format type

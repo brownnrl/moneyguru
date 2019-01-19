@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -582,7 +582,9 @@ class GUITable(GUITableBase):
         return True
 
     def refresh_and_show_selection(self):
-        self.refresh()
+        self.refresh(refresh_view=False)
+        self._update_selection()
+        self.view.refresh()
         self.view.show_selected_row()
 
     def selection_as_csv(self):
@@ -602,33 +604,10 @@ class GUITable(GUITableBase):
         fp.seek(0)
         return fp.read()
 
-    # --- Event handlers
-    def edition_must_stop(self):
-        self.view.stop_editing()
-        self.stop_editing()
-
-    def document_changed(self):
-        self.refresh()
-
-    def document_restoring_preferences(self):
-        self.columns.restore_columns()
-
-    def performed_undo_or_redo(self):
-        self.refresh()
-
-    # Plug these below to the appropriate event in subclasses
-    def _filter_applied(self):
-        self.refresh(refresh_view=False)
-        self._update_selection()
-        self.view.refresh()
-
-    def _item_changed(self):
-        self.refresh_and_show_selection()
-
-    def _item_deleted(self):
-        self.refresh(refresh_view=False)
-        self._update_selection()
-        self.view.refresh()
+    def stop_editing(self):
+        if self.edited is not None:
+            self.view.stop_editing()
+        GUITableBase.stop_editing(self)
 
 
 class Row(RowBase):

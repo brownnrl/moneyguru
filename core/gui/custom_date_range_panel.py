@@ -1,6 +1,4 @@
-# Created By: Virgil Dupras
-# Created On: 2009-02-18
-# Copyright 2015 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -8,12 +6,12 @@
 
 from datetime import date
 
-from ..model.date import CustomDateRange
 from .base import GUIPanel
 
 class CustomDateRangePanel(GUIPanel):
-    def __init__(self, document):
-        GUIPanel.__init__(self, document)
+    def __init__(self, drsel):
+        GUIPanel.__init__(self, drsel.mainwindow)
+        self.drsel = drsel
         self._start_date = date.today()
         self._end_date = date.today()
 
@@ -28,8 +26,9 @@ class CustomDateRangePanel(GUIPanel):
         start = self._start_date
         end = self._end_date
         if self.slot_index > 0:
-            self.app.save_custom_range(self.slot_index-1, self.slot_name, start, end)
-        self.document.date_range = CustomDateRange(start, end, self.app.format_date)
+            self.drsel.save_custom_range(
+                self.slot_index-1, self.slot_name, start, end)
+        self.drsel.select_custom_date_range(start, end)
 
     # --- Properties
     @property

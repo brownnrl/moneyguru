@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -14,7 +14,7 @@ from core.util import nonone, flatten, stripfalse, dedupe
 from core.trans import tr
 
 from ..exception import FileFormatError
-from ..model._ccore import AccountList, Split
+from ..model._ccore import AccountList, Split, TransactionList
 from ..model.account import Group, GroupList, AccountType
 from ..model.amount import parse_amount, of_currency, UnsupportedCurrencyError
 from ..model.budget import Budget
@@ -22,7 +22,6 @@ from ..model.currency import Currencies
 from ..model.oven import Oven
 from ..model.recurrence import Recurrence, Spawn
 from ..model.transaction import Transaction
-from ..model.transaction_list import TransactionList
 
 # date formats to use for format guessing
 # there is not one test for each single format
@@ -299,13 +298,12 @@ class Loader:
                 info.name, account_currency, account_type)
             if info.group:
                 group = self.groups.find(info.group, account_type)
-                account.groupname = group.name
+                account.change(groupname=group.name)
             if info.budget:
-                self.budget_infos.append(BudgetInfo(info.name, info.budget_target, info.budget))
-            account.reference = info.reference
-            account.account_number = info.account_number
-            account.inactive = info.inactive
-            account.notes = info.notes
+                self.budget_infos.append(BudgetInfo(info.name, info.budget))
+            account.change(
+                reference=info.reference, account_number=info.account_number,
+                inactive=info.inactive, notes=info.notes)
             currencies.add(account.currency)
 
         # Pre-parse transaction info. We bring all relevant info recorded at the txn level into the split level
@@ -343,7 +341,8 @@ class Loader:
             start_date = min(start_date, date)
             for position, info in enumerate(transaction_infos, start=1):
                 transaction = load_transaction_info(info)
-                self.transactions.add(transaction, position=position)
+                transaction.position = position
+                self.transactions.add(transaction, True)
 
         # Scheduled
         for info in self.recurrence_infos:
@@ -369,10 +368,9 @@ class Loader:
             account = self.accounts.find(info.account)
             if account is None:
                 continue
-            target = self.accounts.find(info.target) if info.target else None
             amount = self.parse_amount(info.amount, account.currency)
             start_date = nonone(info.start_date, fallback_start_date)
-            budget = Budget(account, target, amount, start_date, repeat_type=info.repeat_type)
+            budget = Budget(account, amount, start_date, repeat_type=info.repeat_type)
             budget.notes = nonone(info.notes, '')
             budget.stop_date = info.stop_date
             if info.repeat_every:

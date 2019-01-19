@@ -63,11 +63,6 @@ typedef struct _Transaction {
     time_t recurrence_date;
 } Transaction;
 
-typedef struct {
-    unsigned int count;
-    Transaction **txns;
-} TransactionList;
-
 void
 transaction_init(Transaction *txn, TransactionType type, time_t date);
 
@@ -213,13 +208,15 @@ transaction_print(const Transaction *txn);
 
 /* Reassign all splits from `account` to `reassign_to`.
  *
- * All splits belonging to `account` will be changed to `reassign_to`.
+ * All splits belonging to `account` will be changed to `to`.
+ *
+ * Returns whether any change was made.
  */
-void
+bool
 transaction_reassign_account(
     Transaction *txn,
     const Account *account,
-    Account *reassign_to);
+    Account *to);
 
 bool
 transaction_remove_split(Transaction *txn, Split *split);
@@ -229,18 +226,3 @@ transaction_remove_split(Transaction *txn, Split *split);
 void
 transaction_resize_splits(Transaction *txn, unsigned int newsize);
 
-void
-transactions_init(TransactionList *txns);
-
-void
-transactions_deinit(TransactionList *txns);
-
-// Result is not initialized (but zeroed out)
-Transaction*
-transactions_create(TransactionList *txns);
-
-bool
-transactions_remove(TransactionList *txns, Transaction *txn);
-
-void
-transactions_sort(TransactionList *txns);

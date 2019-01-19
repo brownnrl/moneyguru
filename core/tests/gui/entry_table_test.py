@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -43,9 +43,9 @@ def test_delete_when_no_entry():
     app.etable.delete() # no crash
 
 def test_selected_entry_index():
-    # When there's no entry, the total row is selected
+    # When there's no entry, the nothing is selected
     app = app_one_account()
-    eq_(app.etable.selected_indexes, [0])
+    eq_(app.etable.selected_indexes, [])
 
 def test_set_decrease_auto_decimal_place():
     # When the auto decimal place option is set, amounts in the decrease column are correctly set.
@@ -148,12 +148,12 @@ def test_entry_is_added_before_total_line(app):
 
 @with_app(app_entry_being_added)
 def test_save(app, tmpdir):
-    # Saving the document ends the edition mode and save the edits
+    # Saving the document abort active editing
     filepath = str(tmpdir.join('foo'))
-    app.doc.save_to_xml(filepath)
+    app.mw.save_to_xml(filepath)
     app.etable.view.check_gui_calls_partial(['stop_editing'])
     assert app.etable.edited is None
-    eq_(app.etable_count(), 1)
+    eq_(app.etable_count(), 0)
 
 # --- One entry
 def app_one_entry():
@@ -233,7 +233,7 @@ def test_debit_credit_columns_edit(app):
 def test_delete_when_entry_selected(app):
     # Before deleting an entry, make sure the entry table is not in edition mode.
     app.etable.delete()
-    app.check_gui_calls(app.etable_gui, ['stop_editing', 'refresh']) # Delete also refreshes.
+    app.check_gui_calls_partial(app.etable_gui, ['stop_editing', 'refresh']) # Delete also refreshes.
 
 @with_app(app_one_entry)
 def test_duplicate_transaction(app):
@@ -604,7 +604,7 @@ def app_with_budget(monkeypatch):
     app.drsel.select_today_date_range()
     app.add_account('foo', account_type=AccountType.Expense)
     app.add_account('bar', account_type=AccountType.Liability)
-    app.add_budget('foo', 'bar', '100')
+    app.add_budget('foo', '100')
     return app
 
 @with_app(app_with_budget)
@@ -615,16 +615,6 @@ def test_budget_spawns(app):
     assert app.etable[0].is_budget
     # Budget spawns can't be edited
     assert not app.etable.can_edit_cell('date', 0)
-
-@with_app(app_with_budget)
-def test_budget_spawns_are_picked_up_by_previous_balance(app):
-    # Ticket #333. Budget spawn weren't affecting the previous balance of the following date ranges.
-    app.drsel.select_month_range()
-    aview = app.show_account('bar')
-    app.drsel.select_next_date_range()
-    # Since we're at the monthly range right after the first budget spawn, our "Previous Balance"
-    # figure is supposed to be 100$.
-    eq_(aview.etable[0].balance, '100.00')
 
 # --- Unreconciled entry in the middle of two reconciled entries
 def app_unreconciled_between_two_reconciled():

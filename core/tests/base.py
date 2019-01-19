@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -20,6 +20,7 @@ from ..loader import base
 from ..model.account import AccountType, ACCOUNT_SORT_KEY
 from ..model.amount import parse_amount
 from ..model.date import DateFormat
+from ..util import flatten
 from .testutil import eq_, CallLogger, TestApp as TestAppBase, TestData
 from .testutil import with_app # noqa
 
@@ -38,12 +39,21 @@ class PanelViewProvider:
     def __init__(self):
         self.current_panel = None
 
-    def get_panel_view(self, model):
+    def close_panel(self):
+        self.current_panel = None
+
+    @classmethod
+    def _logify(cls, model, ignore=None):
+        ignore = ignore or []
         for elem in vars(model).values():
-            if elem is model:
+            if elem is model or elem in ignore:
                 continue
             if isinstance(elem, GUIObject) and elem.view is None:
                 elem.view = CallLogger()
+                cls._logify(elem, ignore + [model])
+
+    def get_panel_view(self, model):
+        self._logify(model)
         self.current_panel = model
         # We have to hold onto this instance for a while
         self.current_panel_view = CallLogger()
@@ -118,27 +128,32 @@ class MainWindowGUI(CallLogger):
 class DictLoader(base.Loader):
     """Used for fake_import"""
     def __init__(
-            self, default_currency, account_name, transactions, default_date_format='%d/%m/%Y',
-            account_reference=None):
+            self, default_currency, infos, default_date_format='%d/%m/%Y'):
+        # `infos` look like:
+        # [{'name': 'account name',
+        #   'reference': ...,
+        #   'txns': [{'date': ..., 'description': ...}]
+        # }]
         base.Loader.__init__(self, default_currency, default_date_format)
-        self.account_name = account_name
-        self.account_reference = account_reference
-        self.transaction_dicts = transactions
-        str_dates = [txn['date'] for txn in transactions]
+        self.infos = infos
+        alltxns = flatten(info['txns'] for info in infos)
+        str_dates = [txn['date'] for txn in alltxns]
         self.parsing_date_format = self.guess_date_format(str_dates)
 
     def _parse(self, infile):
         pass
 
     def _load(self):
-        self.account_info.name = self.account_name
-        self.account_info.reference = self.account_reference
-        for txn in self.transaction_dicts:
-            self.start_transaction()
-            for attr, value in txn.items():
-                if attr == 'date':
-                    value = self.parse_date_str(value)
-                setattr(self.transaction_info, attr, value)
+        for info in self.infos:
+            self.account_info.name = info['name']
+            self.account_info.reference = info.get('reference')
+            for txn in info['txns']:
+                self.start_transaction()
+                for attr, value in txn.items():
+                    if attr == 'date':
+                        value = self.parse_date_str(value)
+                    setattr(self.transaction_info, attr, value)
+            self.flush_account()
 
 class TestApp(TestAppBase):
     __test__ = False
@@ -150,6 +165,7 @@ class TestApp(TestAppBase):
             if not appargs:
                 appargs = {}
             app = Application(self.make_logger(ApplicationGUI()), **appargs)
+        app.autosave_interval = 0
         self.app = app
         self.app_gui = app.view
         if doc is None:
@@ -170,19 +186,10 @@ class TestApp(TestAppBase):
         self.default_parent = self.mw
         self.sfield = link_gui(self.mw.search_field)
         self.drsel = link_gui(self.mw.daterange_selector)
-        self.csvopt = link_gui(self.mw.csv_options)
-        # We have to link the import table's gui before we link iwin's
-        # The order in which the gui is linked in linked_gui causes a crash in pref_test.
-        # import_table.columns has to be linked first.
-        link_gui(self.mw.import_window.import_table.columns)
-        self.itable = link_gui(self.mw.import_window.import_table)
-        self.iwin = link_gui(self.mw.import_window)
         self.alookup = link_gui(self.mw.account_lookup)
         self.clookup = link_gui(self.mw.completion_lookup)
-        self.doc.connect()
         self.mw.view = self.make_logger(MainWindowGUI(self))
         self.mainwindow_gui = self.mw.view
-        self.mw.connect()
 
     def link_gui(self, gui, logger=None):
         if gui.view is None:
@@ -256,8 +263,9 @@ class TestApp(TestAppBase):
         for name in names:
             self.add_account(name)
 
-    def add_budget(self, account_name, target_name, str_amount, start_date=None, repeat_type_index=2,
-            repeat_every=1, stop_date=None):
+    def add_budget(
+            self, account_name, str_amount, start_date=None,
+            repeat_type_index=2, repeat_every=1, stop_date=None):
         # if no target, set target_name to None
         self.show_bview()
         bpanel = self.mainwindow.new_item()
@@ -270,8 +278,6 @@ class TestApp(TestAppBase):
             bpanel.stop_date = stop_date
         account_index = bpanel.account_list.index(account_name)
         bpanel.account_list.select(account_index)
-        target_index = bpanel.target_list.index(target_name) if target_name else 0
-        bpanel.target_list.select(target_index)
         bpanel.amount = str_amount
         bpanel.save()
 
@@ -303,6 +309,7 @@ class TestApp(TestAppBase):
         group = self.doc.new_group(account_type)
         if name is not None:
             self.doc.change_group(group, name=name)
+        self.mw.revalidate()
 
     def add_schedule(self, start_date=None, description='', account=None, amount='0',
             repeat_type_index=0, repeat_every=1, stop_date=None):
@@ -392,7 +399,7 @@ class TestApp(TestAppBase):
         return result
 
     def close_and_load(self):
-        self.doc.close()
+        self.mw.close()
         app = Application(self.app_gui)
         doc = Document(self.app)
         doc.view = self.doc_gui
@@ -421,7 +428,7 @@ class TestApp(TestAppBase):
 
     def do_test_save_load(self):
         newapp = self.save_and_load()
-        newapp.doc.date_range = self.doc.date_range
+        newapp.drsel.set_date_range(self.doc.date_range)
         newapp.doc._cook()
         compare_apps(self.doc, newapp.doc)
 
@@ -434,9 +441,9 @@ class TestApp(TestAppBase):
         newapp = Application(ApplicationGUI(), default_currency=self.doc.default_currency)
         app = TestApp(app=newapp)
         try:
-            app.mw.parse_file_for_import(filepath)
-            while app.iwin.panes:
-                app.iwin.import_selected_pane()
+            iwin = app.mw.parse_file_for_import(filepath)
+            while iwin.panes:
+                iwin.import_selected_pane()
         except FileFormatError:
             pass
         compare_apps(self.doc, app.doc, qif_mode=True)
@@ -455,12 +462,16 @@ class TestApp(TestAppBase):
         # use this methods. 'transactions' is a list of dicts, the dicts being attribute values.
         # dates are strings in the app's default date format.
         default_date_format = DateFormat(self.app.date_format).sys_format
+        infos = [{
+            'name': account_name,
+            'reference': account_reference,
+            'txns': transactions,
+        }]
         self.mw.loader = DictLoader(
-            self.doc.default_currency, account_name, transactions,
-            default_date_format=default_date_format, account_reference=account_reference
+            self.doc.default_currency, infos,
+            default_date_format=default_date_format
         )
-        self.mw.loader.load()
-        self.iwin.show()
+        return self.mw.load_parsed_file_for_import()
 
     def get_current_panel(self):
         """Returns the instance of the last invoked panel.
@@ -476,7 +487,7 @@ class TestApp(TestAppBase):
         # navigate the current date range until target_date is in it. We use year month day to avoid
         # having to import datetime.date in tests.
         assert self.doc.date_range.can_navigate
-        self.doc.date_range = self.doc.date_range.around(date(year, month, day))
+        self.drsel.set_date_range(self.doc.date_range.around(date(year, month, day)))
 
     def new_app_same_prefs(self):
         # Returns a new TestApp() but with the same app_gui as before, thus preserving preferences.
@@ -491,15 +502,15 @@ class TestApp(TestAppBase):
     def save_and_load(self):
         # saves the current document and returns a new app with that document loaded
         filepath = op.join(self.tmppath(), 'foo.xml')
-        self.doc.save_to_xml(str(filepath))
-        self.doc.close()
+        self.mw.save_to_xml(str(filepath))
+        self.mw.close()
         newapp = TestApp(app=self.app)
-        newapp.doc.load_from_xml(str(filepath))
+        newapp.mw.load_from_xml(str(filepath))
         return newapp
 
     def save_file(self):
         filename = op.join(self.tmppath(), 'foo.xml')
-        self.doc.save_to_xml(filename) # reset the dirty flag
+        self.mw.save_to_xml(filename) # reset the dirty flag
         return filename
 
     def select_account(self, account_name):
@@ -558,8 +569,7 @@ class TestApp(TestAppBase):
             plugin.ENABLED_BY_DEFAULT = True
         self.app.plugins = []
         self.app._load_plugin_module(fakemod)
-        self.app._hook_currency_plugins()
-        self.iwin._receive_plugins(plugins)
+        self.app._hook_currency_providers()
 
     # --- Shortcut for selecting a view type.
     def current_view(self):
@@ -728,10 +738,6 @@ def compare_apps(first, second, qif_mode=False):
             compare_txns(txn1, txn2)
     for budget1, budget2 in zip(first.budgets, second.budgets):
         eq_(budget1.account.name, budget2.account.name)
-        if budget1.target is None:
-            assert budget2.target is None
-        else:
-            eq_(budget1.target.name, budget2.target.name)
         eq_(budget1.amount, budget2.amount)
         eq_(budget1.notes, budget2.notes)
         eq_(budget1.repeat_type, budget2.repeat_type)

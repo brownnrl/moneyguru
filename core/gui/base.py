@@ -1,10 +1,8 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
 # http://www.gnu.org/licenses/gpl-3.0.html
-
-from core.notify import Listener, Repeater
 
 from .print_view import PrintView
 
@@ -83,138 +81,13 @@ class GUIObject:
             self._view = NoopGUI()
 
 
-class DocumentNotificationsMixin:
-    """Mixin for listeners of :class:`.Document` notifications."""
-    def account_added(self):
-        """Account(s) were added to the document."""
-
-    def account_changed(self):
-        """Account(s) had some of their properties changed."""
-
-    def account_deleted(self):
-        """Account(s) were deleted from the document."""
-
-    def accounts_excluded(self):
-        """Account(s) had their exclusion status changed."""
-
-    def budget_changed(self):
-        """Budget(s) had some of their properties changed."""
-
-    def budget_deleted(self):
-        """Budget(s) were deleted from the document."""
-
-    def custom_date_range_selected(self):
-        """We need to open the custom date range dialog."""
-
-    def date_range_changed(self):
-        """The current date range was changed."""
-
-    def date_range_will_change(self):
-        """The current date range is just about to change."""
-
-    def document_restoring_preferences(self):
-        """Our document is restoring its state from preferences."""
-
-    def document_changed(self):
-        """The whole doucment has changed (for example, when loading document)."""
-
-    def document_will_close(self):
-        """The document is about to be closed."""
-
-    def edition_must_stop(self):
-        """If any GUI is currently in editing mode, this has to stop now."""
-
-    def filter_applied(self):
-        """A filter has just been applied to our transactions."""
-
-    def first_weekday_changed(self):
-        """The First Weekday preferences has been changed."""
-
-    def performed_undo_or_redo(self):
-        """An undo or redo operation was just performed."""
-
-    def saved_custom_ranges_changed(self):
-        """A custom date range was just saved into one of the slots."""
-
-    def schedule_changed(self):
-        """Schedule(s) had some of their properties changed."""
-
-    def schedule_deleted(self):
-        """Schedule(s) were deleted from the document."""
-
-    def transaction_changed(self):
-        """Transaction(s) had some of their properties changed."""
-
-    def transaction_deleted(self):
-        """Transaction(s) were deleted from the document."""
-
-    def transactions_imported(self):
-        """Transactions have just been imported into the document."""
-
-
-class MainWindowNotificationsMixin:
-    """Mixin for listeners of :class:`.MainWindow` notifications."""
-    def transactions_selected(self):
-        """Transactions were just selected."""
-
-    def area_visibility_changed(self):
-        """One of the main window's main part had its visibility toggled."""
-
-
-class SheetViewNotificationsMixin:
-    """Mixin for listeners of :class:`.AccountSheetView` notifications."""
-    def group_expanded_state_changed(self):
-        """A group had its expand status toggled."""
-
-
-MESSAGES_EVERYTHING_CHANGED = {'document_changed', 'performed_undo_or_redo'}
-MESSAGES_DOCUMENT_CHANGED = (
-    MESSAGES_EVERYTHING_CHANGED |
-    {
-        'account_added', 'account_changed', 'account_deleted', 'transaction_changed',
-        'transaction_deleted', 'transactions_imported', 'budget_changed', 'budget_deleted',
-        'schedule_changed', 'schedule_deleted'
-    }
-)
-
-class HideableObject:
-    """An object receiving notifications, but that is disabled when hidden.
-
-    Notifications can trigger a lot of refreshes all around, and moneyGuru has a lot of GUI elements
-    that are hidden most of the time. What we want to achieve here is to delay refreshes triggered
-    by notifications until our GUI element is shown again.
-
-    A subclass of this class can define two class-level constants:
-
-    ``INVALIDATING_MESSAGES``: a set of all notifications that invalidate our content.
-
-    ``ALWAYSON_MESSAGES``: A set of all notifications that should be processed even when our element
-    is hidden. By default, it contains ``document_restoring_preferences`` because this message isn't
-    really about invalidating content, but rather restoring preferences on document load, which is
-    very important to do, hidden or not.
-    """
-    # Messages that invalidates the view if received while it's hidden (its cache will be
-    # revalidated upon show)
-    INVALIDATING_MESSAGES = set()
-    # Messages that are always passed, even if the object is hidden.
-    ALWAYSON_MESSAGES = {'document_restoring_preferences'}
-
-    def __init__(self):
-        self._hidden = True
-        self._invalidated = True
-
-    # --- Protected
-    def _process_message(self, msg):
-        """*Protected*. Process notification ``msg``.
-
-        Whenever your subclasses receives a notification, call this. It checks whether the
-        notification should be processed and invalidates our element if needed.
-
-        Returns ``True`` if our notification should be further processed. ``False`` if not.
-        """
-        if self._hidden and (msg in self.INVALIDATING_MESSAGES):
-            self._invalidated = True
-        return (not self._hidden) or (msg in self.ALWAYSON_MESSAGES)
+class ViewChild(GUIObject):
+    def __init__(self, parent_view):
+        GUIObject.__init__(self)
+        self.parent_view = parent_view
+        self.mainwindow = parent_view.mainwindow
+        self.document = self.mainwindow.document
+        self.app = self.document.app
 
     def _revalidate(self):
         """*Virtual*. Refresh the GUI element's content.
@@ -224,122 +97,33 @@ class HideableObject:
         our content.
         """
 
-    # --- Public
-    def show(self):
-        """Show the object and revalidate if necessary.
-
-        If an invalidating notification was received while we were hidden, we'll trigger a full
-        refresh with :meth:`_revalidate`.
+    def restore_view(self):
+        """ Called when the view needs to restore it's state from preferences.
         """
-        self._hidden = False
-        if self._invalidated:
-            self._revalidate()
-            self._invalidated = False
-
-    def hide(self):
-        """Hide the object.
-
-        We will no longer process notifications. We'll refresh when we show up again, if needed.
-        """
-        self._hidden = True
-
-
-class DocumentGUIObject(Listener, GUIObject, DocumentNotificationsMixin):
-    """Base class for listeners of :class:`.Document`.
-
-    This base class is not much more than a convenience layer, centralizing multiple subclassing
-    and common properties (:attr:`app` and :attr:`document`). It's a base class for every GUI
-    elements that listen to some notifications from :class:`.Document`.
-
-    Subclasses :class:`.Listener`, :class:`.GUIObject` and :class:`DocumentNotificationsMixin`.
-
-    :param document: Reference document.
-    :type document: :class:`.Document`
-    :param listento: The object to listen our notifications from. Defaults to ``document``.
-    :type listento: :class:`.Broadcaster`
-    """
-    def __init__(self, document, listento=None):
-        if listento is None:
-            listento = document
-        Listener.__init__(self, listento)
-        GUIObject.__init__(self)
-        #: Parent :class:`document <.Document>`.
-        self.document = document
-        #: Parent :class:`app <.Application>`.
-        self.app = document.app
-
-
-class MainWindowGUIObject(DocumentGUIObject, MainWindowNotificationsMixin):
-    """Base class for listeners of :class:`.MainWindow`.
-
-    This base class is not much more than a convenience layer, centralizing multiple subclassing
-    and common properties (:attr:`mainwindow`). It's a base class for every GUI elements that listen
-    to some notifications from :class:`.MainWindow`.
-
-    Subclasses :class:`DocumentGUIObject` and :class:`MainWindowNotificationsMixin`.
-
-    :param mainwindow: Reference mainwindow.
-    :type mainwindow: :class:`.MainWindow`
-    :param listento: The object to listen our notifications from. Defaults to ``mainwindow``.
-    :type listento: :class:`.Broadcaster`
-    """
-    def __init__(self, mainwindow, listento=None):
-        if listento is None:
-            listento = mainwindow
-        DocumentGUIObject.__init__(self, mainwindow.document, listento=listento)
-        #: Parent :class:`main window <.MainWindow>`.
-        self.mainwindow = mainwindow
-
-
-class ViewChild(MainWindowGUIObject, HideableObject):
-    """Visible GUI element listening to notifications from its parent view.
-
-    Subclasses :class:`.MainWindowGUIObject` and :class:`.HideableObject`.
-
-    :param parent_view: View we listen our notifications from.
-    :type parent_view: :class:`BaseView`
-    """
-    def __init__(self, parent_view):
-        MainWindowGUIObject.__init__(self, parent_view.mainwindow, listento=parent_view)
-        HideableObject.__init__(self)
-        #: Parent :class:`base view <BaseView>`.
-        self.parent_view = parent_view
-
-    def _process_message(self, msg):
-        # We never want to process messages (such as document_restoring_preferences) when our view
-        # is None because it will cause a crash.
-        if self.view is None:
-            return False
-        else:
-            return HideableObject._process_message(self, msg)
-
-    def dispatch(self, msg):
-        if self._process_message(msg):
-            Listener.dispatch(self, msg)
 
 
 class GUIPanel(GUIObject):
     """GUI Modal dialog.
 
-    All panels work pretty much the same way: They load up an object's properties, let the user
-    fiddle with them, and then save those properties back in the object.
+    All panels work pretty much the same way: They load up an object's
+    properties, let the user fiddle with them, and then save those properties
+    back in the object.
 
-    As :ref:`described in the devdoc overview <writetoamodel>`, saving to an object doesn't mean
-    directly doing so. We need to go through the :class:`.Document` to do that. Therefore,
-    :meth:`save` doesn't actually do that job, but merely calls the proper document method, with
-    the proper arguments.
-
-    Unlike :class:`DocumentGUIObject`, dialogs don't listen to notifications. They're called upon
-    explicitly. They do, however, hold references to :attr:`app` and :attr:`document`.
+    As :ref:`described in the devdoc overview <writetoamodel>`, saving to an
+    object doesn't mean directly doing so. We need to go through the
+    :class:`.Document` to do that. Therefore, :meth:`save` doesn't actually do
+    that job, but merely calls the proper document method, with the proper
+    arguments.
 
     Subclasses :class:`.GUIObject`.
     """
-    def __init__(self, document):
-        GUIObject.__init__(self)
+    def __init__(self, mainwindow):
+        super().__init__()
+        self.mainwindow = mainwindow
         #: Parent :class:`document <.Document>`.
-        self.document = document
+        self.document = mainwindow.document
         #: Parent :class:`app <.Application>`.
-        self.app = document.app
+        self.app = self.document.app
 
     # --- Virtual
     def _load(self):
@@ -401,32 +185,30 @@ class GUIPanel(GUIObject):
         self._save()
 
 
-class MainWindowPanel(GUIPanel):
-    """A :class:`GUIPanel` with :class:`.MainWindow` as a parent.
+class DocumentGUIObject(GUIObject):
+    def __init__(self, document):
+        super().__init__()
+        self.document = document
+        self.app = document.app
+        self._doc_step = 0
 
-    The vast, vast majority of panels in moneyGuru.
+    def invalidate(self):
+        self._doc_step = 0
 
-    Subclasses :class:`GUIPanel`
-    """
-    def __init__(self, mainwindow):
-        GUIPanel.__init__(self, mainwindow.document)
-        self.mainwindow = mainwindow
+    def revalidate(self):
+        if self.document.step > self._doc_step:
+            self._revalidate()
+            self._doc_step = self.document.step
 
 
-class BaseView(Repeater, GUIObject, HideableObject, DocumentNotificationsMixin, MainWindowNotificationsMixin):
-    """Superclass for main "tabs" controllers.
+class BaseView(DocumentGUIObject):
+    """ The next generation of BaseView.
 
-    You know, the tabs you open in moneyGuru (Net Worth, Transactions, General Ledger)? Their main
-    controller is a subclass of this. They're a GUI object, but they don't have much of an existence
-    as a UI view, their only purpose being to hold the child views together.
+    Unlike BaseView, it doesn't listen or repeat document notifications at all. It's based on the
+    new, simpler mtime-based refresh system.
 
-    Views subclasses are uniquely identified by their :attr:`VIEW_TYPE` attribute which is an
-    ``int`` constant that is kept in sync in the UI layer. This way, when we tell the UI to load up
-    the view ``2``, then it knows that we mean the Transactions tab.
-
-    All views respond to a common subset of methods (our virtual methods below), each in their own
-    ways. There's many buttons and menu items (new, edit, delete, etc.) that have a name that is
-    generic enough to be applied to multiple situations depending on the active tab.
+    The goal is to completely replace BaseView before the next release (which will probably be
+    v3.0).
     """
     # --- model -> view calls:
     # restore_subviews_size()
@@ -438,19 +220,25 @@ class BaseView(Repeater, GUIObject, HideableObject, DocumentNotificationsMixin, 
     PRINT_VIEW_CLASS = PrintView
 
     def __init__(self, mainwindow):
-        Repeater.__init__(self, mainwindow)
-        GUIObject.__init__(self)
-        HideableObject.__init__(self)
-        self._children = []
-        #: :class:`.MainWindow`
+        super().__init__(mainwindow.document)
         self.mainwindow = mainwindow
-        #: :class:`.Document`
         self.document = mainwindow.document
-        #: :class:`.Application`
-        self.app = mainwindow.document.app
         self._status_line = ""
 
+    # --- Temporary stubs
+    def show(self):
+        self.revalidate()
+
+    def hide(self):
+        pass
+
     # --- Virtual
+    def apply_date_range(self, new_date_range, prev_date_range):
+        """A new date range was just set. Adapt to it."""
+
+    def apply_filter(self):
+        """A new filter was just applied. Adapt to it."""
+
     def new_item(self):
         """*Virtual*. Create a new item."""
         raise NotImplementedError()
@@ -486,31 +274,21 @@ class BaseView(Repeater, GUIObject, HideableObject, DocumentNotificationsMixin, 
         """*Virtual*. Move select item(s) down in the list, if possible."""
         raise NotImplementedError()
 
+    def restore_view(self):
+        """ Restore view (recursively) param from preferences."""
 
-    # --- Overrides
-    def dispatch(self, msg):
-        if self._process_message(msg):
-            Repeater.dispatch(self, msg)
-        else:
-            self._repeat_message(msg)
+    def stop_editing(self):
+        """If we're editing something, stop now."""
 
-    # This has to be call *once* and *right after creation*. The children are set after
-    # initialization so that we can pass a reference to self during children's initialization.
-    def set_children(self, children):
-        self._children = children
-        for child in children:
-            child.connect()
-        self.restore_subviews_size()
+    def update_transaction_selection(self, transactions):
+        """Transactions were just selected."""
 
-    def show(self):
-        HideableObject.show(self)
-        for child in self._children:
-            child.show()
+    def update_visibility(self):
+        """One of the main window's main part had its visibility toggled."""
 
-    def hide(self):
-        HideableObject.hide(self)
-        for child in self._children:
-            child.hide()
+    # --- Private
+    def _revalidate(self):
+        pass
 
     # --- Public
     @classmethod
@@ -546,11 +324,4 @@ class BaseView(Repeater, GUIObject, HideableObject, DocumentNotificationsMixin, 
     @status_line.setter
     def status_line(self, value):
         self._status_line = value
-        if not self._hidden:
-            self.mainwindow.update_status_line()
-
-    # --- Notifications
-    def document_restoring_preferences(self):
-        self.restore_subviews_size()
-        if self.view: # Some BaseView don't have a view
-            self.view.restore_subviews_size()
+        self.mainwindow.update_status_line()

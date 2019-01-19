@@ -1,6 +1,4 @@
-# Created By: Virgil Dupras
-# Created On: 2008-08-02
-# Copyright 2015 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -9,7 +7,7 @@
 from ..testutil import eq_
 
 from ..base import TestApp, with_app
-from ...document import FilterType
+from ...const import FilterType
 from ...model.account import AccountType
 
 class TestPristine:
@@ -137,6 +135,16 @@ class TestTransactionsOfEachType:
         app.show_account('Income')
         app.efbar.filter_type = FilterType.Income
         eq_(app.efbar.filter_type, FilterType.Income)
+
+    @with_app(do_setup)
+    def test_show_tview(self, app):
+        # the filter stays active if we come back to the aview (the same one
+        # as where we were before. this means that we test that we invalidate
+        # the view's cache on setting a filter)
+        tview = app.show_tview()
+        tview.filter_bar.filter_type = FilterType.Expense
+        aview = app.show_account('asset 2')
+        eq_(len(aview.table.rows), 2) # filtered
 
 
 class TestThreeEntriesOneReconciled:

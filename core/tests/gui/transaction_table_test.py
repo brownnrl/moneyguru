@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -18,6 +18,37 @@ from ...gui.transaction_table import TransactionTable
 from ...model.date import MonthRange, YearRange
 from ...model.account import AccountType
 from ...model.currency import Currencies
+
+
+#---
+@with_app(TestApp)
+def test_budget_spawns(app, monkeypatch):
+    # When a budget is set budget transaction spawns show up in ttable, at
+    # the end of each month.
+    monkeypatch.patch_today(2008, 1, 27)
+    app.drsel.select_today_date_range()
+    app.add_account('Some Expense', account_type=AccountType.Expense)
+    app.add_budget('Some Expense', '100')
+    app.show_tview()
+    app.clear_gui_calls()
+    eq_(app.ttable.row_count, 12)
+    eq_(app.ttable[0].amount, '100.00')
+    eq_(app.ttable[0].date, '31/01/2008')
+    eq_(app.ttable[0].to, 'Some Expense')
+    assert app.ttable[0].is_budget
+    eq_(app.ttable[11].date, '31/12/2008')
+    # Budget spawns can't be edited
+    assert not app.ttable.can_edit_cell('date', 0)
+    assert app.mw.edit_item() is None # budget spawns can't be edited
+
+@with_app(TestApp)
+def test_save_load_unassigned_txn(app):
+    # Make sure that unassigned transactions are loaded
+    app.show_tview()
+    app.ttable.add()
+    app.ttable[0].amount = '42'
+    app.ttable.save_edits()
+    app.do_test_save_load()
 
 # ---
 def app_tview_shown():
@@ -71,17 +102,17 @@ def test_gui_call_on_filter_applied(app):
     app.show_tview()
     app.clear_gui_calls()
     app.sfield.text = 'foobar'
-    app.check_gui_calls(app.ttable_gui, ['refresh'])
+    app.check_gui_calls_partial(app.ttable_gui, ['refresh'])
 
 @with_app(app_tview_shown)
 def test_refresh_on_import(app):
     # When entries are imported, ttable is refreshed
-    app.doc.date_range = YearRange(date(2007, 1, 1))
+    app.drsel.set_date_range(YearRange(date(2007, 1, 1)))
     app.clear_gui_calls()
-    app.mw.parse_file_for_import(testdata.filepath('qif', 'checkbook.qif'))
-    app.iwin.import_selected_pane()
+    iwin = app.mw.parse_file_for_import(testdata.filepath('qif', 'checkbook.qif'))
+    iwin.import_selected_pane()
     assert app.ttable.row_count != 0
-    app.check_gui_calls(app.ttable_gui, ['refresh'])
+    app.check_gui_calls_partial(app.ttable_gui, ['refresh'])
 
 @with_app(app_tview_shown)
 def test_strip_account_name_in_from_to_columns(app):
@@ -147,20 +178,6 @@ class TestEditionMode:
         # assertion exception later.
         app.ttable.duplicate_selected()
         assert app.ttable.edited is None
-
-# ---
-def app_unassigned_transaction_with_amount():
-    app = TestApp()
-    app.show_tview()
-    app.ttable.add()
-    app.ttable[0].amount = '42'
-    app.ttable.save_edits()
-    return app
-
-@with_app(app_unassigned_transaction_with_amount)
-def test_save_load_unassigned_txn(app):
-    # Make sure that unassigned transactions are loaded
-    app.do_test_save_load()
 
 # --- One transaction
 def app_one_transaction():
@@ -377,7 +394,6 @@ def test_set_row_attr(app):
     # the changes didn't go down to Transaction
     table = TransactionTable(app.tview)
     table.view = app.ttable_gui
-    table.connect()
     table.show()
     assert_row_has_original_attrs(table[0])
 
@@ -392,9 +408,9 @@ def test_undo_redo_while_filtered(app):
     # undo/redo while a filter is applied correctly refreshes the ttable
     app.sfield.text = 'description'
     app.ttable.delete()
-    app.doc.undo()
+    app.mw.undo()
     eq_(app.ttable.row_count, 1)
-    app.doc.redo()
+    app.mw.redo()
     eq_(app.ttable.row_count, 0)
 
 @with_app(app_one_transaction)
@@ -708,32 +724,12 @@ def test_delete_second_then_add(app):
     eq_(app.ttable.edited.date, '12/07/2008')
 
 @with_app(app_three_transactions)
-def test_explicit_selection(app):
-    # Only the explicit selection is sticky. If the non-explicit selection changes, this doesn't
-    # affect the ttable selection.
-    app.show_pview()
-    app.istatement.selected = app.istatement.income[1] # second
-    app.show_account()
-    app.show_tview()
-    eq_(app.ttable.selected_indexes, [2]) # explicit selection
-    # the other way around too
-    app.ttable.select([1])
-    app.show_pview()
-    app.istatement.selected = app.istatement.income[2]
-    app.show_account()
-    app.show_nwview()
-    app.bsheet.selected = app.bsheet.assets[0]
-    app.show_account()
-    eq_(app.etable.selected_indexes, [1]) # explicit selection
-
-@with_app(app_three_transactions)
 def test_selection(app):
     # TransactionTable stays in sync with EntryTable.
-    app.ttable.hide() # this disconnect scheme will eventually be embedded in the main testcase
+    app.show_account('New account')
     app.etable.select([0, 1])
     app.clear_gui_calls()
-    app.etable.hide()
-    app.ttable.show()
+    app.show_tview()
     eq_(app.ttable.selected_indexes, [0, 1])
     app.ttable.view.check_gui_calls(['update_selection', 'show_selected_row'])
 
@@ -848,8 +844,8 @@ def test_added_txn_is_correctly_selected(app):
 # --- Load file
 def app_load_file():
     app = TestApp()
-    app.doc.date_range = MonthRange(date(2008, 2, 1))
-    app.doc.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
+    app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
+    app.mw.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
     app.show_tview()
     return app
 
@@ -1026,7 +1022,7 @@ class TestSevenEntries:
         app = TestApp()
         app.add_account()
         app.show_account()
-        app.doc.date_range = MonthRange(date(2008, 1, 1))
+        app.drsel.set_date_range(MonthRange(date(2008, 1, 1)))
         app.add_entry('1/1/2008', description='txn 1')
         app.add_entry('2/1/2008', description='txn 2')
         app.add_entry('2/1/2008', description='txn 3')
@@ -1150,7 +1146,7 @@ class TestFourEntriesOnTheSameDate:
         app = TestApp()
         app.add_account()
         app.show_account()
-        app.doc.date_range = MonthRange(date(2008, 1, 1))
+        app.drsel.set_date_range(MonthRange(date(2008, 1, 1)))
         app.add_entry('1/1/2008', description='txn 1')
         app.add_entry('1/1/2008', description='txn 2')
         app.add_entry('1/1/2008', description='txn 3')
@@ -1187,31 +1183,6 @@ class TestFourEntriesOnTheSameDate:
         eq_(app.transaction_descriptions(), ['txn 2', 'txn 1', 'txn 3', 'txn 4'])
         app.ttable.move_up()
         eq_(app.transaction_descriptions(), ['txn 2', 'txn 1', 'txn 3', 'txn 4'])
-
-
-class TestWithBudget:
-    def do_setup(self, monkeypatch):
-        app = TestApp()
-        monkeypatch.patch_today(2008, 1, 27)
-        app.drsel.select_today_date_range()
-        app.add_account('Some Expense', account_type=AccountType.Expense)
-        app.add_budget('Some Expense', None, '100')
-        app.show_tview()
-        app.clear_gui_calls()
-        return app
-
-    @with_app(do_setup)
-    def test_budget_spawns(self, app):
-        # When a budget is set budget transaction spawns show up in ttable, at the end of each month.
-        eq_(app.ttable.row_count, 12)
-        eq_(app.ttable[0].amount, '100.00')
-        eq_(app.ttable[0].date, '31/01/2008')
-        eq_(app.ttable[0].to, 'Some Expense')
-        assert app.ttable[0].is_budget
-        eq_(app.ttable[11].date, '31/12/2008')
-        # Budget spawns can't be edited
-        assert not app.ttable.can_edit_cell('date', 0)
-        assert app.mw.edit_item() is None # budget spawns can't be edited
 
 
 @pytest.mark.parametrize(

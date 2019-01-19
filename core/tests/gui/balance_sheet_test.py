@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -232,7 +232,7 @@ def test_save_edits(app):
     app.bsheet.selected = app.bsheet.assets[1]
     app.bsheet.selected.name = 'foobar'
     app.bsheet.save_edits()
-    app.check_gui_calls(app.bsheet_gui, ['refresh'])
+    app.check_gui_calls_partial(app.bsheet_gui, ['refresh'])
 
 # --- One account
 def app_one_account():
@@ -266,10 +266,14 @@ def test_make_account_liability(app):
 
 @with_app(app_one_account)
 def test_selection_follows_account_after_editing(app):
-    # After editing, selection follows the account that was edited. This is important to avoid
-    # confusion when invoking the account panel when still editing the name.
+    # After editing, selection follows the account that was edited.
+    # NOTE: this test used to test the situation where we opened the edit panel
+    #       while the account was still being renamed, but this can't happen
+    #       anymore because we always cancel edits when they're not explicitly
+    #       committed. We added a "save_edits()" to make the test pass.
     app.mw.new_item() # 'New Account', so it's after 'Checking'
     app.bsheet.selected.name = 'aaa' # will end up *before* 'Checking'
+    app.bsheet.save_edits()
     app.mw.edit_item()
     eq_(app.bsheet.selected.name, 'aaa')
 
@@ -352,7 +356,7 @@ def test_save_edits_on_group(app):
     app.bsheet.selected = app.bsheet.assets[0]
     app.bsheet.selected.name = 'foobar'
     app.bsheet.save_edits()
-    app.check_gui_calls(app.bsheet_gui, ['refresh'])
+    app.check_gui_calls_partial(app.bsheet_gui, ['refresh'])
 
 # --- Group in editing mode
 def app_group_in_editing_mode():
@@ -443,7 +447,7 @@ def test_invalid_expanded_paths_are_removed_on_refreshes(app):
     # When a nodes pointed to by the expanded_node property disappear, remove those pointers from
     # expanded_nodes as well (they caused crash on Qt).
     app.bsheet.expand_node(app.bsheet.assets[0])
-    app.doc.clear()
+    app.mw.clear()
     eq_(app.bsheet.expanded_paths, [(0, ), (1, )])
 
 # --- Accounts and entries (Re-used in sub-app funcs below)
@@ -491,58 +495,29 @@ def test_budget(app, monkeypatch):
     # Account 1 is the target of the expense budget, and Account 2 is the target of the income
     # Assign budgeted amounts to the appropriate accounts.
     monkeypatch.patch_today(2008, 1, 15)
-    app.add_budget('income', 'Account 2', '400') # + 150
-    app.add_budget('expense', 'Account 1', '100') # + 80
+    app.add_budget('income', '400') # + 150
+    app.add_budget('expense', '100') # + 80
     app.show_nwview()
     eq_(app.bsheet.assets[0].end, '250.00')
-    eq_(app.bsheet.assets[0].budgeted, '-80.00')
     eq_(app.bsheet.assets[1].end, '80.00')
-    eq_(app.bsheet.assets[1].budgeted, '150.00')
     eq_(app.bsheet.assets.end, '330.00')
-    eq_(app.bsheet.assets.budgeted, '70.00')
+    # NOTE: this value tested below is going to move to the budget view
     eq_(app.bsheet.net_worth.budgeted, '70.00')
     # When we go to the next date range, the "budgeted" value must be cumulated
     app.drsel.select_next_date_range()
-    eq_(app.bsheet.assets[0].budgeted, '-180.00') # 80 + 100
-    eq_(app.bsheet.assets[1].budgeted, '550.00') # 150 + 300
-    eq_(app.bsheet.assets.budgeted, '370.00')
-
-@with_app(app_accounts_and_entries)
-def test_budget_multiple_currencies(app, monkeypatch):
-    # budgeted amounts must be correctly converted to the target account's currency
-    monkeypatch.patch_today(2008, 1, 15)
-    Currencies.get_rates_db().set_CAD_value(date(2008, 1, 1), 'USD', 0.8)
-    app.show_pview()
-    app.istatement.selected = app.istatement.income[0]
-    apanel = app.mw.edit_item()
-    apanel.currency_list.select(Currencies.index('CAD'))
-    apanel.save()
-    app.add_budget('income', 'Account 1', '400 cad')
-    app.show_nwview()
-    eq_(app.bsheet.assets[0].end, '250.00')
-    eq_(app.bsheet.assets[0].budgeted, '250.00') # 400 / 2 / 0.8 = 250
-
-@with_app(app_accounts_and_entries)
-def test_budget_target_liability(app, monkeypatch):
-    # The budgeted amount must be normalized before being added to a liability amount
-    monkeypatch.patch_today(2008, 1, 15)
-    app.add_account('foo', account_type=AccountType.Liability)
-    app.add_budget('income', 'foo', '400')
-    app.show_nwview()
-    eq_(app.bsheet.liabilities[0].end, '0.00')
-    eq_(app.bsheet.liabilities[0].budgeted, '-150.00')
+    eq_(app.bsheet.net_worth.budgeted, '370.00')
 
 @with_app(app_accounts_and_entries)
 def test_budget_without_target(app, monkeypatch):
     # The Net Worth's "budgeted" column counts all budgets, including target-less ones
     monkeypatch.patch_today(2008, 1, 15)
-    app.add_budget('income', None, '400')
+    app.add_budget('income', '400')
     app.show_nwview()
     eq_(app.bsheet.net_worth.budgeted, '150.00')
 
 @with_app(app_accounts_and_entries)
 def test_change_date_range(app):
-    app.doc.date_range = app.doc.date_range.prev()
+    app.drsel.select_prev_date_range()
     eq_(app.bsheet.assets[0].end, '0.00')
     eq_(app.bsheet.assets[1].start, '0.00')
     eq_(app.bsheet.assets[1].end, '100.00')
@@ -600,8 +575,8 @@ def test_selection_as_csv(app):
     app.bsheet.selected = app.bsheet.assets[0] # Account 1
     csvdata = app.bsheet.selection_as_csv()
     rows = list(csv.reader(StringIO(csvdata), delimiter='\t'))
-    # The contents of the columns, in order [name, end, start, budgeted]
-    expected = [['Account 1', '250.00', '0.00', '0.00']]
+    # The contents of the columns, in order [name, end, start]
+    expected = [['Account 1', '250.00', '0.00']]
     eq_(rows, expected)
 
 # --- Multiple currencies

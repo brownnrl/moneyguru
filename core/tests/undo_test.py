@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -18,12 +18,21 @@ from ..model.date import MonthRange
 from ..model.account import AccountType
 from .base import compare_apps, testdata, TestApp, with_app
 
+class bag: pass
+
+def copyaccount(a):
+    res = bag()
+    ATTRS = ['name', 'type', 'currency', 'account_number', 'inactive', 'notes']
+    for attr in ATTRS:
+        setattr(res, attr, getattr(a, attr))
+    return res
+
 def copydoc(doc):
     # doing a deepcopy on the document itself makes a deepcopy of *all* guis because they're
     # listeners. What we do is a shallow copy of it, *then* a deepcopy of stuff we compare
     # afterwards.
     newdoc = copy.copy(doc)
-    newdoc.accounts = [a.copy() for a in doc.accounts]
+    newdoc.accounts = [copyaccount(a) for a in doc.accounts]
     newdoc.entrycounts = {}
     for a in doc.accounts:
         entries = doc.accounts.entries_for_account(a)
@@ -40,9 +49,9 @@ def checkstate(request):
     previous_state = copydoc(app.doc)
     def docheck():
         before_undo = copydoc(app.doc)
-        app.doc.undo()
+        app.mw.undo()
         compare_apps(previous_state, app.doc)
-        app.doc.redo()
+        app.mw.redo()
         compare_apps(before_undo, app.doc)
     return docheck
 
@@ -101,8 +110,8 @@ def test_add_transaction(app, checkstate):
 def test_import(app, checkstate):
     # When undoing an import that creates income/expense accounts, don't crash on auto account
     # removal
-    app.mw.parse_file_for_import(testdata.filepath('qif', 'checkbook.qif'))
-    app.iwin.import_selected_pane()
+    iwin = app.mw.parse_file_for_import(testdata.filepath('qif', 'checkbook.qif'))
+    iwin.import_selected_pane()
     checkstate()
 
 @with_app(TestApp)
@@ -112,7 +121,7 @@ def test_undo_shown_account(app):
     app.show_pview()
     app.mw.new_item()
     app.show_account()
-    app.doc.undo() # no crash
+    app.mw.undo() # no crash
 
 # ---
 def app_one_nameless_account():
@@ -140,32 +149,32 @@ def app_one_named_account():
 @with_app(app_one_named_account)
 def test_action_after_undo(app):
     # When doing an action after an undo, the whole undo chain is broken at the current index.
-    app.doc.undo() # undo set name
+    app.mw.undo() # undo set name
     app.show_nwview()
     app.bsheet.selected = app.bsheet.assets[0]
     app.bsheet.selected.name = 'foobaz'
     app.bsheet.save_edits()
-    app.doc.undo() # undo set name
-    app.doc.redo()
+    app.mw.undo() # undo set name
+    app.mw.redo()
     eq_(app.bsheet.assets[0].name, 'foobaz')
     assert not app.doc.can_redo()
-    app.doc.undo()
-    app.doc.undo() # undo add account
+    app.mw.undo()
+    app.mw.undo() # undo add account
     eq_(app.bsheet.assets.children_count, 2)
 
 @with_app(app_one_named_account)
 def test_can_redo_after_action(app):
     # can_redo is false as long as an undo hasn't been performed.
     assert not app.doc.can_redo()
-    app.doc.undo()
+    app.mw.undo()
     assert app.doc.can_redo() # now we can redo()
 
 @with_app(app_one_named_account)
 def test_can_undo_after_action(app):
     # Now that an account has been added, can_undo() is True.
     assert app.doc.can_undo()
-    app.doc.undo()
-    app.doc.undo()
+    app.mw.undo()
+    app.mw.undo()
     assert not app.doc.can_undo()
 
 @with_app(app_one_named_account)
@@ -183,16 +192,16 @@ def test_descriptions_after_action(app):
     # The undo/redo description system works properly.
     eq_(app.doc.undo_description(), 'Change account')
     assert app.doc.redo_description() is None
-    app.doc.undo()
+    app.mw.undo()
     eq_(app.doc.undo_description(), 'Add account')
     eq_(app.doc.redo_description(), 'Change account')
-    app.doc.undo()
+    app.mw.undo()
     assert app.doc.undo_description() is None
     eq_(app.doc.redo_description(), 'Add account')
-    app.doc.redo()
+    app.mw.redo()
     eq_(app.doc.undo_description(), 'Add account')
     eq_(app.doc.redo_description(), 'Change account')
-    app.doc.redo()
+    app.mw.redo()
     eq_(app.doc.undo_description(), 'Change account')
     assert app.doc.redo_description() is None
 
@@ -209,9 +218,10 @@ def test_gui_calls(app):
     # the correct gui calls are made when undoing/redoing (in particular: stop_editing)
     app.show_nwview()
     app.clear_gui_calls()
-    app.doc.undo()
+    app.bsheet.selected.name = 'foo' # edit something
+    app.mw.undo()
     app.check_gui_calls(app.bsheet_gui, ['refresh', 'stop_editing'])
-    app.doc.redo()
+    app.mw.redo()
     app.check_gui_calls(app.bsheet_gui, ['refresh', 'stop_editing'])
 
 @with_app(app_one_named_account)
@@ -221,18 +231,18 @@ def test_modified_status(app, tmpdir):
     assert not app.doc.is_dirty()
     app.add_entry()
     assert app.doc.is_dirty()
-    app.doc.undo()
+    app.mw.undo()
     assert not app.doc.is_dirty()
-    app.doc.redo()
+    app.mw.redo()
     assert app.doc.is_dirty()
-    app.doc.undo()
+    app.mw.undo()
     assert not app.doc.is_dirty()
-    app.doc.undo()
+    app.mw.undo()
     assert app.doc.is_dirty()
-    app.doc.redo()
+    app.mw.redo()
     assert not app.doc.is_dirty()
-    app.doc.undo()
-    app.doc.undo()
+    app.mw.undo()
+    app.mw.undo()
     assert app.doc.is_dirty()
 
 @with_app(app_one_named_account)
@@ -241,11 +251,11 @@ def test_redo_delete_while_in_etable(app):
     app.show_nwview()
     app.bsheet.selected = app.bsheet.assets[0]
     app.bsheet.delete()
-    app.doc.undo()
+    app.mw.undo()
     app.bsheet.selected = app.bsheet.assets[0]
     app.show_account()
     app.clear_gui_calls()
-    app.doc.redo()
+    app.mw.redo()
     app.check_current_pane(PaneType.NetWorth)
     expected = ['view_closed', 'change_current_pane', 'refresh_undo_actions', 'refresh_status_line']
     app.check_gui_calls(app.mainwindow_gui, expected)
@@ -285,9 +295,9 @@ def test_undo_set_account_name(app, checkstate):
 def test_undo_add_while_in_etable(app):
     # If we're in etable and perform an undo that removes the account we're in, go back to the bsheet
     app.show_aview()
-    app.doc.undo()
+    app.mw.undo()
     app.clear_gui_calls()
-    app.doc.undo()
+    app.mw.undo()
     app.check_current_pane(PaneType.NetWorth)
     expected = ['view_closed', 'change_current_pane', 'refresh_undo_actions', 'refresh_status_line']
     app.check_gui_calls(app.mainwindow_gui, expected)
@@ -298,8 +308,8 @@ def test_undo_twice(app):
     # Previously, a copy of the changed account would be inserted, making it impossible for
     # undo to find the account to be removed.
     app.show_nwview()
-    app.doc.undo()
-    app.doc.undo()
+    app.mw.undo()
+    app.mw.undo()
     eq_(app.bsheet.assets.children_count, 2)
 
 # ---
@@ -374,10 +384,10 @@ def test_undo_move_account_out_of_group(app, checkstate):
 def app_load_file():
     # Loads 'simple.moneyguru', a file with 2 accounts and 2 entries in each. Select the first entry.
     app = TestApp()
-    app.doc.date_range = MonthRange(date(2008, 2, 1))
+    app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
     # This is to set the modified flag to true so we can make sure it has been put back to false
     app.add_account()
-    app.doc.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
+    app.mw.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
     # we have to cheat here because the first save state is articifially
     # different than the second save state because the second state has
     # the currency rates fetched. So what we do here is wait a little bit
@@ -454,17 +464,17 @@ def test_descriptions_after_add_txn(app):
 @with_app(app_two_txns_in_two_accounts)
 def test_etable_refreshes(app):
     app.clear_gui_calls()
-    app.doc.undo()
+    app.mw.undo()
     eq_(app.etable_count(), 1)
-    app.check_gui_calls(app.etable_gui, ['refresh', 'stop_editing'])
+    app.check_gui_calls_partial(app.etable_gui, ['refresh'])
 
 @with_app(app_two_txns_in_two_accounts)
 def test_ttable_refreshes(app):
     app.show_tview()
     app.clear_gui_calls()
-    app.doc.undo()
+    app.mw.undo()
     eq_(app.ttable.row_count, 1)
-    app.check_gui_calls(app.ttable_gui, ['refresh', 'stop_editing'])
+    app.check_gui_calls_partial(app.ttable_gui, ['refresh'])
 
 @with_app(app_two_txns_in_two_accounts)
 def test_undo_change_transaction_from_etable(app, checkstate):
@@ -551,7 +561,7 @@ def test_undo_schedule_entry_transfer(app):
     tpanel = app.mw.edit_item()
     tpanel.repeat_index = 1 # daily
     tpanel.save()
-    app.doc.undo()
+    app.mw.undo()
     eq_(app.etable[0].transfer, 'second')
 
 # ---
@@ -637,9 +647,9 @@ def test_toggle_reconciled(app, checkstate):
 # ---
 def app_import_ofx():
     app = TestApp()
-    app.doc.date_range = MonthRange(date(2008, 2, 1))
-    app.mw.parse_file_for_import(testdata.filepath('ofx', 'desjardins.ofx'))
-    app.iwin.import_selected_pane()
+    app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
+    iwin = app.mw.parse_file_for_import(testdata.filepath('ofx', 'desjardins.ofx'))
+    iwin.import_selected_pane()
     # same cheat as in LoadFile
     time.sleep(0.05)
     app.doc._cook()
@@ -665,10 +675,10 @@ def test_undo_delete_transaction_with_import_ref(app, checkstate):
 def test_undo_import(app, checkstate):
     # Undoing an import removes all accounts and transactions added by  that import. It also
     # undo changes that have been made.
-    app.mw.parse_file_for_import(testdata.filepath('ofx', 'desjardins2.ofx'))
+    iwin = app.mw.parse_file_for_import(testdata.filepath('ofx', 'desjardins2.ofx'))
     # this is the pane that has stuff in it
-    app.iwin.selected_target_account_index = 1
-    app.iwin.import_selected_pane()
+    iwin.selected_target_account_index = 1
+    iwin.import_selected_pane()
     checkstate()
 
 # ---
@@ -712,7 +722,7 @@ def test_change_spawn_globally(app):
     app.ttable.select([0])
     app.ttable[0].description = 'changed'
     app.ttable.save_edits()
-    app.doc.undo()
+    app.mw.undo()
     eq_(app.ttable[1].description, 'foobar')
 
 @with_app(app_scheduled_txn)
@@ -736,7 +746,7 @@ def test_delete_spawn_undo_then_delete_again(app):
     app.show_tview()
     app.ttable.select([0])
     app.ttable.delete()
-    app.doc.undo()
+    app.mw.undo()
     # we don't care about the exact len, we just care that it decreases by 1
     len_before = app.ttable.row_count
     app.ttable.select([0])
@@ -765,7 +775,7 @@ def app_with_budget(monkeypatch):
     monkeypatch.patch_today(2008, 1, 27)
     app.drsel.select_today_date_range()
     app.add_account('Some Expense', account_type=AccountType.Expense)
-    app.add_budget('Some Expense', None, '100')
+    app.add_budget('Some Expense', '100')
     app.show_bview()
     app.btable.select([0])
     return app

@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -11,7 +11,7 @@ from core.trans import tr
 
 from ..model.account import ACCOUNT_SORT_KEY
 from .column import Columns
-from .base import ViewChild, SheetViewNotificationsMixin, MESSAGES_DOCUMENT_CHANGED
+from .base import ViewChild
 from . import tree
 
 # used in both bsheet and istatement
@@ -21,36 +21,25 @@ def get_delta_perc(delta_amount, start_amount):
     else:
         return '---'
 
-class Report(ViewChild, tree.Tree, SheetViewNotificationsMixin):
+class Report(ViewChild, tree.Tree):
     SAVENAME = ''
     COLUMNS = []
-    INVALIDATING_MESSAGES = MESSAGES_DOCUMENT_CHANGED | {'accounts_excluded', 'date_range_changed'}
 
     def __init__(self, parent_view):
         ViewChild.__init__(self, parent_view)
         tree.Tree.__init__(self)
-        self._was_restored = False
         self.columns = Columns(self, prefaccess=parent_view.document, savename=self.SAVENAME)
         self.edited = None
         self._expanded_paths = {(0, ), (1, )}
 
     # --- Override
-    def _do_restore_view(self):
-        if not self.document.can_restore_from_prefs():
-            return False
+    def restore_view(self):
         prefname = '{}.ExpandedPaths'.format(self.SAVENAME)
         expanded = self.document.get_default(prefname, list())
         if expanded:
             self._expanded_paths = {tuple(p) for p in expanded}
             self.view.refresh_expanded_paths()
         self.columns.restore_columns()
-        return True
-
-    def _revalidate(self):
-        self.refresh(refresh_view=False)
-        self._update_selection()
-        self.view.refresh()
-        self.restore_view()
 
     # --- Virtual
     def _compute_account_node(self, node):
@@ -107,7 +96,8 @@ class Report(ViewChild, tree.Tree, SheetViewNotificationsMixin):
             account_group = None
         if account_group is not None:
             account_group.expanded = True
-        account = self.document.new_account(account_type, account_group) # refresh happens on account_added
+        account = self.document.new_account(account_type, account_group)
+        self.mainwindow.revalidate()
         self.selected = self._node_of_account(account)
         self.view.update_selection()
         self.view.start_editing()
@@ -124,6 +114,7 @@ class Report(ViewChild, tree.Tree, SheetViewNotificationsMixin):
             path = self.selected_path
             account_type = self[1].type if path and path[0] == 1 else self[0].type
         group = self.document.new_group(account_type)
+        self.mainwindow.revalidate()
         self.selected = self.find(lambda n: getattr(n, 'group', None) is group)
         self.view.update_selection()
         self.view.start_editing()
@@ -151,6 +142,11 @@ class Report(ViewChild, tree.Tree, SheetViewNotificationsMixin):
         return True
 
     def cancel_edits(self):
+        # The behavior for calling view.stop_editing() in Report is a bit
+        # different than with tables: we *always* call it instead of calling it
+        # only when something is edited. I'm not sure why. Comments in tests
+        # talk about causing crashes. TODO: investigate and clarify comment.
+        self.view.stop_editing()
         node = self.edited
         if node is None:
             return
@@ -180,6 +176,7 @@ class Report(ViewChild, tree.Tree, SheetViewNotificationsMixin):
                 panel.load(accounts)
             else:
                 self.document.delete_accounts(accounts)
+        self.mainwindow.revalidate()
 
     def expand_node(self, node):
         self._expanded_paths.add(tuple(node.path))
@@ -246,6 +243,7 @@ class Report(ViewChild, tree.Tree, SheetViewNotificationsMixin):
             self.document.change_accounts(accounts, group=None, type=dest_node.type)
         elif dest_node.is_group:
             self.document.change_accounts(accounts, group=dest_node.group, type=dest_node.group.type)
+        self.mainwindow.revalidate()
 
     def refresh(self, refresh_view=True):
         selected_accounts = self.selected_accounts
@@ -258,16 +256,28 @@ class Report(ViewChild, tree.Tree, SheetViewNotificationsMixin):
                 selected_nodes.append(node_of_account)
         if selected_nodes:
             self.selected_nodes = selected_nodes
-        else:
+        elif len(selected_paths) == 1 and len(selected_paths[0]) > 1:
+            # If our selected path is not an account or group (because of a
+            # deletion, most probably), try to select the node preceding it so
+            # that our selection stays in the realm of accounts/groups.
+            selected_path = selected_paths[0]
+            try:
+                next_node = self.get_node(selected_path)
+            except IndexError:
+                self._select_first()
+            else:
+                if not (next_node.is_account or next_node.is_group):
+                    selected_path[-1] -= 1
+                    if selected_path[-1] < 0:
+                        selected_path = selected_path[:-1]
+                self.selected_path = selected_path
+        elif selected_paths:
             self.selected_paths = selected_paths
+        else:
+            self._select_first()
         self._prune_invalid_expanded_paths()
         if refresh_view:
             self.view.refresh()
-
-    def restore_view(self):
-        if not self._was_restored:
-            if self._do_restore_view():
-                self._was_restored = True
 
     def save_edits(self):
         node = self.edited
@@ -279,6 +289,7 @@ class Report(ViewChild, tree.Tree, SheetViewNotificationsMixin):
             success = self.document.change_accounts([node.account], name=node.name)
         else:
             success = self.document.change_group(node.group, name=node.name)
+        self.mainwindow.revalidate()
         if not success:
             msg = tr("The account '{0}' already exists.").format(node.name)
             # we use _name because we don't want to change self.edited
@@ -316,6 +327,7 @@ class Report(ViewChild, tree.Tree, SheetViewNotificationsMixin):
         self.mainwindow.open_account(node.account)
 
     def stop_editing(self):
+        self.view.stop_editing()
         if self.edited is not None:
             self.save_edits()
 
@@ -332,51 +344,7 @@ class Report(ViewChild, tree.Tree, SheetViewNotificationsMixin):
             elif node.is_account:
                 affected_accounts.add(node.account)
         if affected_accounts:
-            self.document.toggle_accounts_exclusion(affected_accounts)
-
-    # --- Event handlers
-    def account_added(self):
-        self.refresh()
-
-    def account_changed(self):
-        self.refresh()
-
-    def account_deleted(self):
-        selected_path = self.selected_path
-        self.refresh(refresh_view=False)
-        next_node = self.get_node(selected_path)
-        if not (next_node.is_account or next_node.is_group):
-            selected_path[-1] -= 1
-            if selected_path[-1] < 0:
-                selected_path = selected_path[:-1]
-        self.selected_path = selected_path
-        self.view.refresh()
-
-    def accounts_excluded(self):
-        self.refresh()
-
-    def date_range_changed(self):
-        self.refresh()
-
-    document_restoring_preferences = restore_view
-
-    def edition_must_stop(self):
-        self.view.stop_editing()
-        self.stop_editing()
-
-    # account might have been auto-created during import
-    def transactions_imported(self):
-        self.refresh(refresh_view=False)
-        self._select_first()
-        self.view.refresh()
-
-    def document_changed(self):
-        self.refresh(refresh_view=False)
-        self._select_first()
-        self.view.refresh()
-
-    def performed_undo_or_redo(self):
-        self.refresh()
+            self.parent_view.toggle_accounts_exclusion(affected_accounts)
 
     # --- Properties
     @property

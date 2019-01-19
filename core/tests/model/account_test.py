@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -8,13 +8,12 @@ from datetime import date
 
 from ..testutil import eq_
 
-from ...model._ccore import AccountList
+from ...model._ccore import AccountList, TransactionList
 from ...model.account import Group, AccountType, ACCOUNT_SORT_KEY
 from ...model.currency import Currencies
 from ...model.date import MonthRange
 from ...model.oven import Oven
 from ...model.transaction import Transaction
-from ...model.transaction_list import TransactionList
 from ..base import Amount
 
 class TestAccountComparison:
@@ -90,13 +89,14 @@ def test_accountlist_contains():
     # AccountList membership is based on account name, not Account instances.
     # Account name tests are exact though, so it's not the exact same thing
     # as in find()
-    al = AccountList('CAD')
-    a1 = al.create('foo', 'CAD', AccountType.Asset)
-    assert a1 in al
-    a2 = a1.copy()
-    assert a2 in al
-    # we can also remove by with another PyAccount instance
-    al.remove(a2)
-    assert a1 not in al
-    assert a2 not in al
-
+    al1 = AccountList('CAD')
+    a1 = al1.create('foo', 'CAD', AccountType.Asset)
+    a2 = al1.create('bar', 'CAD', AccountType.Asset)
+    al2 = AccountList('CAD')
+    a3 = al2.create('foo', 'CAD', AccountType.Asset)
+    assert a1 in al1
+    assert a1 in al2
+    assert a2 in al1
+    assert a2 not in al2
+    assert a3 in al1
+    assert a3 in al2

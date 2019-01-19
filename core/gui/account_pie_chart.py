@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -10,17 +10,9 @@
 from collections import defaultdict
 from core.trans import tr
 from ..model.account import AccountType
-from ..model.amount import convert_amount
-from ..model.date import DateRange
-from .base import SheetViewNotificationsMixin
 from .pie_chart import PieChart
 
-class _AccountPieChart(PieChart, SheetViewNotificationsMixin):
-    INVALIDATING_MESSAGES = (
-        PieChart.INVALIDATING_MESSAGES |
-        {'accounts_excluded', 'group_expanded_state_changed'}
-    )
-
+class _AccountPieChart(PieChart):
     def __init__(self, parent_view, title):
         PieChart.__init__(self, parent_view)
         self._title = title
@@ -50,13 +42,6 @@ class _AccountPieChart(PieChart, SheetViewNotificationsMixin):
     def title(self):
         return self._title
 
-    # --- Event Handlers
-    def accounts_excluded(self):
-        self._revalidate()
-
-    def group_expanded_state_changed(self):
-        self._revalidate()
-
 
 class BalancePieChart(_AccountPieChart):
     def __init__(self, networth_view):
@@ -70,10 +55,7 @@ class BalancePieChart(_AccountPieChart):
         def get_value(account):
             entries = self.document.accounts.entries_for_account(account)
             balance = entries.normal_balance(date, currency)
-            budget_date_range = DateRange(date.min, self.document.date_range.end)
-            budgeted = self.document.budgeted_amount_for_target(account, budget_date_range)
-            budgeted = convert_amount(budgeted, currency, date)
-            return balance + budgeted
+            return balance
 
         return [(a, get_value(a)) for a in accounts]
 

@@ -5,8 +5,10 @@
 #include "amount.h"
 #include "entry.h"
 #include "split.h"
-#include "transaction.h"
+#include "transactions.h"
 #include "accounts.h"
+#include "undo.h"
+#include "recurrence.h"
 #include "util.h"
 
 // NOTE ABOUT DECREF AND ERRORS
@@ -37,8 +39,6 @@ static PyObject *Amount_Type;
 typedef struct {
     PyObject_HEAD
     Account *account;
-    // If true, we own the Account instance and have to free it.
-    bool owned;
 } PyAccount;
 
 static PyObject *Account_Type;
@@ -112,10 +112,21 @@ static PyObject *EntryList_Type;
 
 typedef struct {
     PyObject_HEAD
-    PyObject *txns;
+    TransactionList tlist;
+    // cache
+    PyObject *descriptions;
+    PyObject *payees;
+    PyObject *account_names;
 } PyTransactionList;
 
 static PyObject *TransactionList_Type;
+
+typedef struct {
+    PyObject_HEAD
+    UndoStep step;
+} PyUndoStep;
+
+static PyObject *UndoStep_Type;
 
 /* Utils */
 static PyObject*
@@ -855,7 +866,6 @@ _PyAccount_from_account(Account *account)
 {
     PyAccount *res = (PyAccount *)PyType_GenericAlloc((PyTypeObject *)Account_Type, 0);
     res->account = account;
-    res->owned = false;
     return res;
 }
 
@@ -871,22 +881,6 @@ PyAccount_currency(PyAccount *self)
     int len;
     len = strlen(self->account->currency->code);
     return PyUnicode_DecodeASCII(self->account->currency->code, len, NULL);
-}
-
-static int
-PyAccount_currency_set(PyAccount *self, PyObject *value)
-{
-    PyObject *tmp = PyUnicode_AsASCIIString(value);
-    if (tmp == NULL) {
-        return -1;
-    }
-    Currency *cur = getcur(PyBytes_AsString(tmp));
-    Py_DECREF(tmp);
-    if (cur == NULL) {
-        return -1;
-    }
-    self->account->currency = cur;
-    return 0;
 }
 
 static PyObject *
@@ -919,34 +913,10 @@ _PyAccount_str2type(const char *s)
     }
 }
 
-static int
-PyAccount_type_set(PyAccount *self, PyObject *value)
-{
-    PyObject *tmp = PyUnicode_AsASCIIString(value);
-    if (tmp == NULL) {
-        return -1;
-    }
-    char *s = PyBytes_AsString(tmp);
-    int res = _PyAccount_str2type(s);
-    if (res >= 0) {
-        self->account->type = res;
-        return 0;
-    } else {
-        PyErr_SetString(PyExc_ValueError, "invalid type");
-        return -1;
-    }
-}
-
 static PyObject *
 PyAccount_reference(PyAccount *self)
 {
     return _strget(self->account->reference);
-}
-
-static int
-PyAccount_reference_set(PyAccount *self, PyObject *value)
-{
-    return _strset(&self->account->reference, value) ? 0 : -1;
 }
 
 static PyObject *
@@ -955,22 +925,10 @@ PyAccount_groupname(PyAccount *self)
     return _strget(self->account->groupname);
 }
 
-static int
-PyAccount_groupname_set(PyAccount *self, PyObject *value)
-{
-    return _strset(&self->account->groupname, value) ? 0 : -1;
-}
-
 static PyObject *
 PyAccount_account_number(PyAccount *self)
 {
     return _strget(self->account->account_number);
-}
-
-static int
-PyAccount_account_number_set(PyAccount *self, PyObject *value)
-{
-    return _strset(&self->account->account_number, value) ? 0 : -1;
 }
 
 static PyObject *
@@ -981,13 +939,6 @@ PyAccount_inactive(PyAccount *self)
     } else {
         Py_RETURN_FALSE;
     }
-}
-
-static int
-PyAccount_inactive_set(PyAccount *self, PyObject *value)
-{
-    self->account->inactive = PyObject_IsTrue(value);
-    return 0;
 }
 
 static PyObject *
@@ -1004,12 +955,6 @@ static PyObject *
 PyAccount_notes(PyAccount *self)
 {
     return _strget(self->account->notes);
-}
-
-static int
-PyAccount_notes_set(PyAccount *self, PyObject *value)
-{
-    return _strset(&self->account->notes, value) ? 0 : -1;
 }
 
 static PyObject *
@@ -1109,27 +1054,65 @@ PyAccount_combined_display(PyAccount *self)
     }
 }
 
-static PyObject *
-PyAccount_copy(PyAccount *self)
+static PyObject*
+PyAccount_change(PyAccount *self, PyObject *args, PyObject *kwds)
 {
-    PyAccount *r = (PyAccount *)PyType_GenericAlloc((PyTypeObject *)Account_Type, 0);
-    r->owned = true;
-    r->account = malloc(sizeof(Account));
-    memset(r->account, 0, sizeof(Account));
-    account_copy(r->account, self->account);
-    return (PyObject *)r;
-}
+    char *currency_code = NULL;
+    char *type_name = NULL;
+    PyObject *reference = NULL;
+    PyObject *groupname = NULL;
+    PyObject *account_number = NULL;
+    int inactive = -1;
+    PyObject *notes = NULL;
 
-static void
-PyAccount_dealloc(PyAccount *self)
-{
-    // Unless we own our Account through copy(), we don't dealloc our Account.
-    // AccountList takes care of that.
-    if (self->owned) {
-        account_deinit(self->account);
-        free(self->account);
+    static char *kwlist[] = {
+        "currency", "type", "reference", "groupname", "account_number",
+        "inactive", "notes", NULL};
+
+    int res = PyArg_ParseTupleAndKeywords(
+        args, kwds, "|$ssOOOpO", kwlist, &currency_code, &type_name, &reference,
+        &groupname, &account_number, &inactive, &notes);
+    if (!res) {
+        return NULL;
     }
-    Py_TYPE(self)->tp_free(self);
+    if (currency_code != NULL) {
+        Currency *cur = getcur(currency_code);
+        if (cur == NULL) {
+            return NULL;
+        }
+        self->account->currency = cur;
+    }
+    if (type_name != NULL) {
+        int type = _PyAccount_str2type(type_name);
+        if (type < 0) {
+            return NULL;
+        }
+        self->account->type = type;
+    }
+    if (reference != NULL) {
+        if (!_strset(&self->account->reference, reference)) {
+            return NULL;
+        }
+    }
+    if (groupname != NULL) {
+        if (!_strset(&self->account->groupname, groupname)) {
+            return NULL;
+        }
+    }
+    if (account_number != NULL) {
+        if (!_strset(&self->account->account_number, account_number)) {
+            return NULL;
+        }
+    }
+    if (inactive != -1) {
+        self->account->inactive = inactive;
+    }
+    if (notes != NULL) {
+        if (!_strset(&self->account->notes, notes)) {
+            return NULL;
+        }
+    }
+    Py_RETURN_NONE;
 }
 
 /* Split attrs */
@@ -1957,7 +1940,8 @@ PyTransaction_repr(PyTransaction *self)
         return NULL;
     }
     PyObject *res = PyUnicode_FromFormat(
-        "Transaction(%d %S %s)", self->txn->type, tdate, self->txn->description);
+        "Transaction(%d %S %s %d %p)",
+        self->txn->type, tdate, self->txn->description, self->owned, self->txn);
     Py_DECREF(tdate);
     return res;
 }
@@ -2551,7 +2535,6 @@ static PyAccount*
 _PyAccountList_create(PyAccountList *self, char *name, Currency *cur, AccountType type)
 {
     PyAccount *account = (PyAccount *)PyType_GenericAlloc((PyTypeObject *)Account_Type, 0);
-    account->owned = false;
     Account *a = accounts_create(&self->alist);
     account->account = a;
     account_init(a, name, cur, type);
@@ -2910,6 +2893,45 @@ py_patch_today(PyObject *self, PyObject *today_p)
     Py_RETURN_NONE;
 }
 
+static PyObject*
+py_inc_date(PyObject *self, PyObject *args)
+{
+    PyObject *date_py;
+    char *type;
+    int count;
+
+    if (!PyArg_ParseTuple(args, "Osi", &date_py, &type, &count)) {
+        return NULL;
+    }
+    time_t date = pydate2time(date_py);
+    if (date == 1) {
+        return NULL;
+    }
+    RepeatType rt;
+    if (strcmp(type, "daily") == 0) {
+        rt = REPEAT_DAILY;
+    } else if (strcmp(type, "weekly") == 0) {
+        rt = REPEAT_WEEKLY;
+    } else if (strcmp(type, "monthly") == 0) {
+        rt = REPEAT_MONTHLY;
+    } else if (strcmp(type, "yearly") == 0) {
+        rt = REPEAT_YEARLY;
+    } else if (strcmp(type, "weekday") == 0) {
+        rt = REPEAT_WEEKDAY;
+    } else if (strcmp(type, "weekday_last") == 0) {
+        rt = REPEAT_WEEKDAY_LAST;
+    } else {
+        PyErr_SetString(PyExc_ValueError, "invalid type");
+        return NULL;
+    }
+    time_t res = inc_date(date, rt, count);
+    if (res == -1) {
+        Py_RETURN_NONE;
+    } else {
+        return time2pydate(res);
+    }
+}
+
 /* PyTransactionList */
 
 static int
@@ -2922,8 +2944,51 @@ PyTransactionList_init(PyTransactionList *self, PyObject *args, PyObject *kwds)
         return -1;
     }
 
-    self->txns = PyList_New(0);
+    transactions_init(&self->tlist);
+    self->descriptions = NULL;
+    self->payees = NULL;
+    self->account_names = NULL;
     return 0;
+}
+
+static PyObject*
+PyTransactionList_clear_cache(PyTransactionList *self)
+{
+    if (self->descriptions != NULL) {
+        Py_DECREF(self->descriptions);
+        self->descriptions = NULL;
+    }
+    if (self->payees != NULL) {
+        Py_DECREF(self->payees);
+        self->payees = NULL;
+    }
+    if (self->account_names != NULL) {
+        Py_DECREF(self->account_names);
+        self->account_names = NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject*
+PyTransactionList_account_names(PyTransactionList *self)
+{
+    if (self->account_names != NULL) {
+        Py_INCREF(self->account_names);
+        return self->account_names;
+    }
+    char **account_names = transactions_account_names(&self->tlist);
+    char **iter = account_names;
+    PyObject *res = PyList_New(0);
+    while (*iter != NULL) {
+        PyObject *s = _strget(*iter);
+        PyList_Append(res, s);
+        Py_DECREF(s);
+        iter++;
+    }
+    free(account_names);
+    self->account_names = res;
+    Py_INCREF(self->account_names);
+    return res;
 }
 
 static PyObject*
@@ -2931,93 +2996,306 @@ PyTransactionList_add(PyTransactionList *self, PyObject *args)
 {
     PyTransaction *txn;
     int keep_position = false;
-    int position = -1;
 
-    if (!PyArg_ParseTuple(args, "O|pi", &txn, &keep_position, &position)) {
+    if (!PyArg_ParseTuple(args, "O|p", &txn, &keep_position)) {
         return NULL;
     }
     if (!PyObject_IsInstance((PyObject *)txn, Transaction_Type)) {
         PyErr_SetString(PyExc_TypeError, "not a txn");
         return NULL;
     }
-    PyList_Append(self->txns, (PyObject *)txn);
+    Transaction *toadd;
+    if (txn->owned) {
+        // Steal ref
+        toadd = txn->txn;
+        txn->owned = false;
+    } else {
+        /* WARNING: this below only works because we (temporarily), never free
+         * Transaction instances. If a txn is not owned, it means that it's
+         * owned by another list, probably a list we're importing for a loader.
+         * For now, we don't have a better solution than keeping pointers
+         * intact, but this *has* to be changed before release.
+         *
+         * This is the code as it should probably be:
+         * toadd = calloc(1, sizeof(Transaction));
+         * transaction_copy(toadd, txn->txn);
+         * txn->txn = toadd;
+         */
+        toadd = txn->txn;
+    }
+    if (transactions_find(&self->tlist, toadd) >= 0) {
+        PyErr_SetString(PyExc_ValueError, "already there");
+        return NULL;
+    }
+
+    transactions_add(&self->tlist, toadd, keep_position);
+    PyTransactionList_clear_cache(self);
     Py_RETURN_NONE;
 }
 
 static PyObject*
 PyTransactionList_clear(PyTransactionList *self, PyObject *args)
 {
-    Py_ssize_t len = PyList_Size(self->txns);
-    if (PyList_SetSlice(self->txns, 0, len, NULL) == -1) {
-        return NULL;
-    }
+    PyTransactionList_clear_cache(self);
+    transactions_deinit(&self->tlist);
+    transactions_init(&self->tlist);
     Py_RETURN_NONE;
+}
+
+static PyObject*
+PyTransactionList_descriptions(PyTransactionList *self)
+{
+    if (self->descriptions != NULL) {
+        Py_INCREF(self->descriptions);
+        return self->descriptions;
+    }
+    char **descs = transactions_descriptions(&self->tlist);
+    char **iter = descs;
+    PyObject *res = PyList_New(0);
+    while (*iter != NULL) {
+        PyObject *s = _strget(*iter);
+        PyList_Append(res, s);
+        Py_DECREF(s);
+        iter++;
+    }
+    free(descs);
+    self->descriptions = res;
+    Py_INCREF(self->descriptions);
+    return res;
 }
 
 static PyObject*
 PyTransactionList_first(PyTransactionList *self, PyObject *args)
 {
-    PyObject *res = PyList_GetItem(self->txns, 0); // borrowed
-    Py_INCREF(res);
-    return res;
+    if (!self->tlist.count) {
+        PyErr_SetString(PyExc_IndexError, "");
+        return NULL;
+    }
+    return (PyObject *)_PyTransaction_from_txn(self->tlist.txns[0]);
 }
 
 static PyObject*
 PyTransactionList_last(PyTransactionList *self, PyObject *args)
 {
-    Py_ssize_t len = PyList_Size(self->txns);
-    PyObject *res = PyList_GetItem(self->txns, len - 1); // borrowed
-    Py_INCREF(res);
-    return res;
+    if (!self->tlist.count) {
+        PyErr_SetString(PyExc_IndexError, "");
+        return NULL;
+    }
+    return (PyObject *)_PyTransaction_from_txn(
+        self->tlist.txns[self->tlist.count-1]);
 }
 
 static PyObject*
-PyTransactionList_remove(PyTransactionList *self, PyObject *txn)
+PyTransactionList_payees(PyTransactionList *self)
 {
-    return PyObject_CallMethod(self->txns, "remove", "O", txn);
+    if (self->payees != NULL) {
+        Py_INCREF(self->payees);
+        return self->payees;
+    }
+    char **payees = transactions_payees(&self->tlist);
+    char **iter = payees;
+    PyObject *res = PyList_New(0);
+    while (*iter != NULL) {
+        PyObject *s = _strget(*iter);
+        PyList_Append(res, s);
+        Py_DECREF(s);
+        iter++;
+    }
+    free(payees);
+    self->payees = res;
+    Py_INCREF(self->payees);
+    return res;
+}
+
+static PyObject *
+PyTransactionList_move_before(PyTransactionList *self, PyObject *args)
+{
+    PyTransaction *txn_p, *target_p;
+
+    if (!PyArg_ParseTuple(args, "OO", &txn_p, &target_p)) {
+        return NULL;
+    }
+    Transaction *txn = txn_p->txn;
+    Transaction *target = (PyObject *)target_p == Py_None ? NULL : target_p->txn;
+    transactions_move_before(&self->tlist, txn, target);
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+PyTransactionList_move_last(PyTransactionList *self, PyTransaction *txn)
+{
+    transactions_move_before(&self->tlist, txn->txn, NULL);
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+PyTransactionList_reassign_account(PyTransactionList *self, PyObject *args)
+{
+    PyAccount *account_p, *reassign_to_p = NULL;
+
+    if (!PyArg_ParseTuple(args, "O|O", &account_p, &reassign_to_p)) {
+        return NULL;
+    }
+    Account *account = account_p->account;
+    Account *reassign_to = NULL;
+    if (reassign_to_p != NULL && (PyObject *)reassign_to_p != Py_None) {
+        reassign_to = reassign_to_p->account;
+    }
+    transactions_reassign_account(&self->tlist, account, reassign_to);
+    PyTransactionList_clear_cache(self);
+    Py_RETURN_NONE;
+}
+
+static PyObject*
+PyTransactionList_remove(PyTransactionList *self, PyTransaction *txn)
+{
+    if (!transactions_remove(&self->tlist, txn->txn)) {
+        return NULL;
+    }
+    PyTransactionList_clear_cache(self);
+    Py_RETURN_NONE;
 }
 
 static PyObject*
 PyTransactionList_sort(PyTransactionList *self, PyObject *args)
 {
-    Py_ssize_t len = PyList_Size(self->txns);
-    PyObject *sorter = PyList_New(len);
-    for (int i=0; i<len; i++) {
-        PyTransaction *txn = (PyTransaction *)PyList_GetItem(self->txns, i); // borrowed
-        PyObject *date = PyTransaction_date(txn);
-        PyObject *position = PyTransaction_position(txn);
-        PyObject *t = PyTuple_Pack(3, date, position, (PyObject *)txn);
-        Py_DECREF(date);
-        Py_DECREF(position);
-        PyList_SetItem(sorter, i, t); // stolen
-    }
-    PyList_Sort(sorter);
-    for (int i=0; i<len; i++) {
-        PyObject *t = PyList_GetItem(sorter, i); // borrowed
-        PyObject *txn = PyTuple_GetItem(t, 2); // borrowed
-        Py_INCREF(txn);
-        PyList_SetItem(self->txns, i, txn); // stolen
-    }
-    Py_DECREF(sorter);
+    transactions_sort(&self->tlist);
     Py_RETURN_NONE;
+}
+
+static PyObject*
+PyTransactionList_transactions_at_date(PyTransactionList *self, PyObject *date_py)
+{
+    time_t date = pydate2time(date_py);
+    if (date == 1) {
+        return NULL;
+    }
+    Transaction **txns = transactions_at_date(&self->tlist, date);
+    PyObject *res = PySet_New(NULL);
+    if (txns == NULL) {
+        return res;
+    }
+    Transaction **iter = txns;
+    while (*iter != NULL) {
+        PyTransaction *txn = _PyTransaction_from_txn(*iter);
+        PySet_Add(res, (PyObject *)txn);
+        Py_DECREF(txn);
+        iter++;
+    }
+    free(txns);
+    return res;
+}
+
+static int
+PyTransactionList_contains(PyTransactionList *self, PyTransaction *txn)
+{
+    if (txn->owned) {
+        return 0;
+    }
+    return transactions_find(&self->tlist, txn->txn) >= 0 ? 1 : 0;
 }
 
 static PyObject*
 PyTransactionList_iter(PyTransactionList *self)
 {
-    return PyObject_GetIter(self->txns);
+    PyObject *list = PyList_New(self->tlist.count);
+    for (unsigned int i=0; i<self->tlist.count; i++) {
+        PyList_SetItem(
+            list, i, (PyObject *)_PyTransaction_from_txn(self->tlist.txns[i]));
+    }
+    PyObject *res = PyObject_GetIter(list);
+    Py_DECREF(list);
+    return res;
 }
 
 static Py_ssize_t
 PyTransactionList_len(PyTransactionList *self)
 {
-    return PyList_Size(self->txns);
+    return self->tlist.count;
 }
 
 static void
 PyTransactionList_dealloc(PyTransactionList *self)
 {
-    Py_DECREF(self->txns);
+    transactions_deinit(&self->tlist);
+    Py_XDECREF(self->descriptions);
+    Py_XDECREF(self->payees);
+    Py_XDECREF(self->account_names);
+    Py_TYPE(self)->tp_free(self);
+}
+
+/* PyUndoStep */
+
+static Account**
+_pyseq2accounts(PyObject *seq)
+{
+    Account **res;
+    Py_ssize_t len = PySequence_Length(seq);
+    res = malloc(sizeof(Account*) * (len + 1));
+    PyObject *fast = PySequence_Fast(seq, "");
+    for (int i=0; i<len; i++) {
+        res[i] = ((PyAccount *)PySequence_Fast_GET_ITEM(fast, i))->account;
+    }
+    res[len] = NULL;
+    Py_DECREF(fast);
+    return res;
+}
+
+static int
+PyUndoStep_init(PyUndoStep *self, PyObject *args, PyObject *kwds)
+{
+    PyObject *added_accounts, *deleted_accounts, *changed_accounts;
+    static char *kwlist[] = {
+        "added_accounts", "deleted_accounts", "changed_accounts", NULL};
+
+    int res = PyArg_ParseTupleAndKeywords(
+        args, kwds, "OOO", kwlist, &added_accounts, &deleted_accounts,
+        &changed_accounts);
+    if (!res) {
+        return -1;
+    }
+    Account **a = _pyseq2accounts(added_accounts);
+    Account **d = _pyseq2accounts(deleted_accounts);
+    Account **c = _pyseq2accounts(changed_accounts);
+    undostep_init(&self->step, a, d, c);
+    free(a);
+    free(d);
+    free(c);
+    return 0;
+}
+
+static PyObject *
+PyUndoStep_undo(PyUndoStep *self, PyObject *args)
+{
+    PyAccountList *alist;
+
+    if (!PyArg_ParseTuple(args, "O", &alist)) {
+        return NULL;
+    }
+    if (!undostep_undo(&self->step, &alist->alist)) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+PyUndoStep_redo(PyUndoStep *self, PyObject *args)
+{
+    PyAccountList *alist;
+
+    if (!PyArg_ParseTuple(args, "O", &alist)) {
+        return NULL;
+    }
+    if (!undostep_redo(&self->step, &alist->alist)) {
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+static void
+PyUndoStep_dealloc(PyUndoStep *self)
+{
+    undostep_deinit(&self->step);
     Py_TYPE(self)->tp_free(self);
 }
 
@@ -3171,6 +3449,7 @@ static PyMethodDef module_methods[] = {
     {"currency_daterange", py_currency_daterange, METH_VARARGS},
     {"oven_cook_txns", py_oven_cook_txns, METH_VARARGS},
     {"patch_today", py_patch_today, METH_O},
+    {"inc_date", py_inc_date, METH_VARARGS},
     {NULL}  /* Sentinel */
 };
 
@@ -3209,7 +3488,7 @@ PyType_Spec EntryList_Type_Spec = {
 };
 
 static PyMethodDef PyAccount_methods[] = {
-    {"copy", (PyCFunction)PyAccount_copy, METH_NOARGS, ""},
+    {"change", (PyCFunction)PyAccount_change, METH_VARARGS|METH_KEYWORDS, ""},
     {"normalize_amount", (PyCFunction)PyAccount_normalize_amount, METH_O, ""},
     {"is_balance_sheet_account", (PyCFunction)PyAccount_is_balance_sheet_account, METH_NOARGS, ""},
     {"is_credit_account", (PyCFunction)PyAccount_is_credit_account, METH_NOARGS, ""},
@@ -3220,14 +3499,14 @@ static PyMethodDef PyAccount_methods[] = {
 
 static PyGetSetDef PyAccount_getseters[] = {
     {"combined_display", (getter)PyAccount_combined_display, NULL, NULL, NULL},
-    {"currency", (getter)PyAccount_currency, (setter)PyAccount_currency_set, NULL, NULL},
-    {"type", (getter)PyAccount_type, (setter)PyAccount_type_set, NULL, NULL},
+    {"currency", (getter)PyAccount_currency, NULL, NULL, NULL},
+    {"type", (getter)PyAccount_type, NULL, NULL, NULL},
     {"name", (getter)PyAccount_name, NULL, NULL, NULL},
-    {"reference", (getter)PyAccount_reference, (setter)PyAccount_reference_set, NULL, NULL},
-    {"groupname", (getter)PyAccount_groupname, (setter)PyAccount_groupname_set, NULL, NULL},
-    {"account_number", (getter)PyAccount_account_number, (setter)PyAccount_account_number_set, NULL, NULL},
-    {"inactive", (getter)PyAccount_inactive, (setter)PyAccount_inactive_set, NULL, NULL},
-    {"notes", (getter)PyAccount_notes, (setter)PyAccount_notes_set, NULL, NULL},
+    {"reference", (getter)PyAccount_reference, NULL, NULL, NULL},
+    {"groupname", (getter)PyAccount_groupname, NULL, NULL, NULL},
+    {"account_number", (getter)PyAccount_account_number, NULL, NULL, NULL},
+    {"inactive", (getter)PyAccount_inactive, NULL, NULL, NULL},
+    {"notes", (getter)PyAccount_notes, NULL, NULL, NULL},
     {"autocreated", (getter)PyAccount_autocreated, NULL, NULL, NULL},
     {0, 0, 0, 0, 0},
 };
@@ -3238,7 +3517,6 @@ static PyType_Slot Account_Slots[] = {
     {Py_tp_hash, PyAccount_hash},
     {Py_tp_repr, PyAccount_repr},
     {Py_tp_richcompare, PyAccount_richcompare},
-    {Py_tp_dealloc, PyAccount_dealloc},
     {0, 0},
 };
 
@@ -3362,17 +3640,31 @@ PyType_Spec Transaction_Type_Spec = {
 static PyMethodDef PyTransactionList_methods[] = {
     {"add", (PyCFunction)PyTransactionList_add, METH_VARARGS, ""},
     {"clear", (PyCFunction)PyTransactionList_clear, METH_NOARGS, ""},
+    {"clear_cache", (PyCFunction)PyTransactionList_clear_cache, METH_NOARGS, ""},
     {"first", (PyCFunction)PyTransactionList_first, METH_NOARGS, ""},
     {"last", (PyCFunction)PyTransactionList_last, METH_NOARGS, ""},
+    {"move_before", (PyCFunction)PyTransactionList_move_before, METH_VARARGS, ""},
+    {"move_last", (PyCFunction)PyTransactionList_move_last, METH_O, ""},
+    {"reassign_account", (PyCFunction)PyTransactionList_reassign_account, METH_VARARGS, ""},
     {"remove", (PyCFunction)PyTransactionList_remove, METH_O, ""},
     {"sort", (PyCFunction)PyTransactionList_sort, METH_NOARGS, ""},
+    {"transactions_at_date", (PyCFunction)PyTransactionList_transactions_at_date, METH_O, ""},
     {0, 0, 0, 0},
+};
+
+static PyGetSetDef PyTransactionList_getseters[] = {
+    {"account_names", (getter)PyTransactionList_account_names, NULL, NULL, NULL},
+    {"descriptions", (getter)PyTransactionList_descriptions, NULL, NULL, NULL},
+    {"payees", (getter)PyTransactionList_payees, NULL, NULL, NULL},
+    {0, 0, 0, 0, 0},
 };
 
 static PyType_Slot TransactionList_Slots[] = {
     {Py_tp_init, PyTransactionList_init},
     {Py_tp_methods, PyTransactionList_methods},
+    {Py_tp_getset, PyTransactionList_getseters},
     {Py_sq_length, PyTransactionList_len},
+    {Py_sq_contains, PyTransactionList_contains},
     {Py_tp_iter, PyTransactionList_iter},
     {Py_tp_dealloc, PyTransactionList_dealloc},
     {0, 0},
@@ -3384,6 +3676,27 @@ PyType_Spec TransactionList_Type_Spec = {
     0,
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
     TransactionList_Slots,
+};
+
+static PyMethodDef PyUndoStep_methods[] = {
+    {"undo", (PyCFunction)PyUndoStep_undo, METH_VARARGS, ""},
+    {"redo", (PyCFunction)PyUndoStep_redo, METH_VARARGS, ""},
+    {0, 0, 0, 0},
+};
+
+static PyType_Slot UndoStep_Slots[] = {
+    {Py_tp_init, PyUndoStep_init},
+    {Py_tp_methods, PyUndoStep_methods},
+    {Py_tp_dealloc, PyUndoStep_dealloc},
+    {0, 0},
+};
+
+PyType_Spec UndoStep_Type_Spec = {
+    "_ccore.UndoStep",
+    sizeof(PyUndoStep),
+    0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    UndoStep_Slots,
 };
 
 static struct PyModuleDef CCoreDef = {
@@ -3442,5 +3755,8 @@ PyInit__ccore(void)
 
     TransactionList_Type = PyType_FromSpec(&TransactionList_Type_Spec);
     PyModule_AddObject(m, "TransactionList", TransactionList_Type);
+
+    UndoStep_Type = PyType_FromSpec(&UndoStep_Type_Spec);
+    PyModule_AddObject(m, "UndoStep", UndoStep_Type);
     return m;
 }

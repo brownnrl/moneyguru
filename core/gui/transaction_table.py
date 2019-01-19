@@ -50,6 +50,7 @@ class TransactionTable(TransactionTableBase):
         transactions = self.selected_transactions
         if transactions:
             self.document.delete_transactions(transactions)
+            self.mainwindow.revalidate()
 
     def _fill(self):
         self._all_amounts_are_native = True
@@ -87,18 +88,6 @@ class TransactionTable(TransactionTableBase):
     @property
     def selected_transactions(self):
         return [row.transaction for row in self.selected_rows if hasattr(row, 'transaction')]
-
-    # --- Event handlers
-    def date_range_changed(self):
-        self.refresh(refresh_view=False)
-        self._update_selection()
-        self.view.refresh()
-        self.view.show_selected_row()
-
-    def transactions_imported(self):
-        self.refresh(refresh_view=False)
-        self._update_selection()
-        self.view.refresh()
 
 
 AUTOFILL_ATTRS = {'description', 'payee', 'from', 'to', 'amount'}
@@ -178,6 +167,7 @@ class TransactionTableRow(Row, RowWithDateMixIn):
         if self.can_edit_amount:
             changed_fields['amount'] = self._amount
         self.document.change_transactions([transaction], **changed_fields)
+        self.table.mainwindow.revalidate()
         self.load()
 
     def sort_key_for_column(self, column_name):

@@ -4,32 +4,26 @@
 # which should be included with this package. The terms are also available at
 # http://www.gnu.org/licenses/gpl-3.0.html
 
-from core.notify import Listener
 from core.trans import tr
 from ..const import PaneType
-from .base import BaseView, MESSAGES_DOCUMENT_CHANGED
 from .filter_bar import EntryFilterBar
 from .entry_table import EntryTable
 from .account_balance_graph import AccountBalanceGraph
 from .account_flow_graph import AccountFlowGraph
 from .transaction_print import EntryPrint
-from .transaction_view import ViewWithTransactionsMixin
+from .transaction_view import TransactionViewBase
 
-class AccountView(BaseView, ViewWithTransactionsMixin):
+class AccountView(TransactionViewBase):
     VIEW_TYPE = PaneType.Account
     PRINT_TITLE_FORMAT = tr('{account_name}\nEntries from {start_date} to {end_date}')
     PRINT_VIEW_CLASS = EntryPrint
-    INVALIDATING_MESSAGES = (
-        MESSAGES_DOCUMENT_CHANGED |
-        {'filter_applied', 'date_range_changed', 'transactions_selected', 'area_visibility_changed'}
-    )
 
     def __init__(self, mainwindow, account):
-        BaseView.__init__(self, mainwindow)
+        TransactionViewBase.__init__(self, mainwindow)
         assert account is not None
         self.account = account
         self._reconciliation_mode = False
-        self.etable = EntryTable(self)
+        self.etable = self.table = EntryTable(self)
         self.maintable = self.etable
         self.columns = self.maintable.columns
         self.balgraph = AccountBalanceGraph(self)
@@ -39,10 +33,23 @@ class AccountView(BaseView, ViewWithTransactionsMixin):
             self._shown_graph = self.balgraph
         else:
             self._shown_graph = self.bargraph
-        self.set_children([self.etable, self._shown_graph])
+        self.restore_subviews_size()
 
-    # --- Private
+    # --- Override
+    def _view_updated(self):
+        if self._shown_graph is self.balgraph:
+            self.view.show_line_graph()
+        else:
+            self.view.show_bar_graph()
+
+    def _revalidate(self):
+        TransactionViewBase._revalidate(self)
+        self.filter_bar.refresh()
+
     def _refresh_totals(self):
+        # _shown_graph is not precisely a "total", but whenever we want to
+        # refresh totals, we'll want to refresh the graph as well.
+        self._shown_graph._revalidate()
         account = self.account
         if account is None:
             return
@@ -58,26 +65,10 @@ class AccountView(BaseView, ViewWithTransactionsMixin):
         msg = tr("{0} out of {1} selected. Increase: {2} Decrease: {3}")
         self.status_line = msg.format(selected, total, total_increase_fmt, total_decrease_fmt)
 
-    # --- Override
-    def _view_updated(self):
-        if self._shown_graph is self.balgraph:
-            self.view.show_line_graph()
-        else:
-            self.view.show_bar_graph()
-
-    def _revalidate(self):
+    def apply_date_range(self, new_date_range, prev_date_range):
+        self._invalidate_cache()
+        self.table._revalidate(prev_date_range=prev_date_range)
         self._refresh_totals()
-        self.view.refresh_reconciliation_button()
-        self.filter_bar.refresh()
-        self.view.update_visibility()
-
-    def dispatch(self, msg):
-        # in AccountView, it's very important that children receive their msgs
-        # *before* we dispatch to self because notifications call
-        # _refresh_totals() which depends on having a refreshed etable.
-        self._repeat_message(msg)
-        if self._process_message(msg):
-            Listener.dispatch(self, msg)
 
     def restore_subviews_size(self):
         if self.balgraph.view_size[1]:
@@ -87,11 +78,16 @@ class AccountView(BaseView, ViewWithTransactionsMixin):
 
     def show(self):
         self.etable.columns.restore_columns()
-        BaseView.show(self)
+        TransactionViewBase.show(self)
+        self.etable.show()
+        self._refresh_totals()
+        self.view.refresh_reconciliation_button()
+        self.filter_bar.refresh()
+        self.view.update_visibility()
 
     def hide(self):
         self.etable.columns.save_columns()
-        BaseView.hide(self)
+        TransactionViewBase.hide(self)
 
     def save_preferences(self):
         # Unlike other views, we don't save preferences on pane closing, but much more frequently:
@@ -104,16 +100,13 @@ class AccountView(BaseView, ViewWithTransactionsMixin):
         if height:
             self.document.set_default('AccountView.GraphHeight', height)
 
+    def update_transaction_selection(self, transactions):
+        self._refresh_totals()
+
+    def update_visibility(self):
+        self.view.update_visibility()
+
     # --- Public
-    def delete_item(self):
-        self.etable.delete()
-
-    def duplicate_item(self):
-        self.etable.duplicate_selected()
-
-    def edit_item(self):
-        return self.edit_selected_transactions()
-
     def navigate_back(self):
         """When the entry table is shown, go back to the appropriate report."""
         if self.account.is_balance_sheet_account():
@@ -126,9 +119,6 @@ class AccountView(BaseView, ViewWithTransactionsMixin):
 
     def move_up(self):
         self.etable.move_up()
-
-    def new_item(self):
-        self.etable.add()
 
     def show_account(self):
         self.etable.show_transfer_account()
@@ -146,33 +136,3 @@ class AccountView(BaseView, ViewWithTransactionsMixin):
     @property
     def reconciliation_mode(self):
         return self._reconciliation_mode
-
-    # --- Event Handlers
-    def area_visibility_changed(self):
-        self.view.update_visibility()
-
-    def date_range_changed(self):
-        self._refresh_totals()
-
-    def document_changed(self):
-        self._refresh_totals()
-
-    def filter_applied(self):
-        self._refresh_totals()
-        self.filter_bar.refresh()
-
-    def performed_undo_or_redo(self):
-        self._refresh_totals()
-
-    def transactions_selected(self):
-        self._refresh_totals()
-
-    def transaction_changed(self):
-        self._refresh_totals()
-
-    def transaction_deleted(self):
-        self._refresh_totals()
-
-    def transactions_imported(self):
-        self._refresh_totals()
-

@@ -1,6 +1,4 @@
-# Created By: Virgil Dupras
-# Created On: 2009-11-29
-# Copyright 2015 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -10,8 +8,9 @@ from PyQt5 import QtCore
 from PyQt5.QtCore import Qt, QAbstractTableModel
 from PyQt5.QtGui import QPixmap, QCursor
 from PyQt5.QtWidgets import (
-    QWidget, QMenu, QInputDialog, QMessageBox, QVBoxLayout, QLabel, QGridLayout, QComboBox,
-    QLineEdit, QSpacerItem, QSizePolicy, QHBoxLayout, QPushButton, QTableView, QAbstractItemView
+    QDialog, QMenu, QInputDialog, QMessageBox, QVBoxLayout, QLabel,
+    QGridLayout, QComboBox, QLineEdit, QSpacerItem, QSizePolicy, QHBoxLayout,
+    QPushButton, QTableView, QAbstractItemView
 )
 
 from core.trans import trget
@@ -23,18 +22,17 @@ NEW_LAYOUT = 'new_layout'
 RENAME_LAYOUT = 'rename_layout'
 DELETE_LAYOUT = 'delete_layout'
 
-class CSVOptionsWindow(QWidget):
-    def __init__(self, mainwindow):
-        QWidget.__init__(self, mainwindow, Qt.Window)
+class CSVOptionsWindow(QDialog):
+    def __init__(self, model, mainwindow):
+        QDialog.__init__(self, mainwindow, Qt.Window)
         self._setupUi()
         self.doc = mainwindow.doc
-        self.model = mainwindow.model.csv_options
+        self.model = model
         self.tableModel = CSVOptionsTableModel(self.model, self.tableView)
-        self.model.view = self
         self.encodingComboBox.addItems(SUPPORTED_ENCODINGS)
 
-        self.cancelButton.clicked.connect(self.hide)
-        self.continueButton.clicked.connect(self.model.continue_import)
+        self.cancelButton.clicked.connect(self.close)
+        self.continueButton.clicked.connect(self.continueImport)
         self.targetComboBox.currentIndexChanged.connect(self.targetIndexChanged)
         self.layoutComboBox.currentIndexChanged.connect(self.layoutIndexChanged)
         self.rescanButton.clicked.connect(self.rescanClicked)
@@ -42,6 +40,7 @@ class CSVOptionsWindow(QWidget):
     def _setupUi(self):
         self.setWindowTitle(tr("CSV Options"))
         self.resize(526, 369)
+        self.setModal(True)
         self.verticalLayout = QVBoxLayout(self)
         msg = tr(
             "Specify which CSV columns correspond to which transaction fields. You must also "
@@ -120,6 +119,11 @@ class CSVOptionsWindow(QWidget):
             self.model.rename_selected_layout(name)
 
     # --- Event Handling
+    def continueImport(self):
+        if self.model.continue_import() is not None:
+            # no problem with continue_import, so we close()
+            self.close()
+
     def layoutIndexChanged(self, index):
         # This one is a little complicated. We want to only be able to select the layouts. If
         # anything else is clicked, we revert back to the old index. If the item has user data,
@@ -148,7 +152,12 @@ class CSVOptionsWindow(QWidget):
         self.model.selected_target_index = index
 
     # --- model --> view
-    # hide() is called from the model, but is already covered by QWidget
+    def close(self):
+        # Make sure to break any circular reference.
+        del self.tableModel.model
+        del self.model
+        super().close()
+
     def refresh_columns(self):
         self.tableModel.beginResetModel()
         self.tableModel.endResetModel()
@@ -177,12 +186,6 @@ class CSVOptionsWindow(QWidget):
         self.targetComboBox.clear()
         self.targetComboBox.addItems(self.model.target_account_names)
         self.targetComboBox.currentIndexChanged.connect(self.targetIndexChanged)
-
-    def show(self):
-        # For non-modal dialogs, show() is not enough to bring the window at the forefront, we have
-        # to call raise() as well
-        QWidget.show(self)
-        self.raise_()
 
     def show_message(self, msg):
         title = "Warning"

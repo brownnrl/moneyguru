@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -8,7 +8,7 @@
 # in every test unit can get tedious, so this test unit is a "theme based" unit which tests calls
 # made to GUIs' view.
 
-from ...document import FilterType
+from ...const import FilterType
 from ...model.account import AccountType
 from ..base import TestApp, with_app, testdata
 
@@ -71,14 +71,12 @@ def test_change_column_visibility(app):
 def test_change_default_currency():
     # When the default currency is changed, all gui refresh themselves
     app = app_cleared_gui_calls()
+    dpview = app.show_dpview()
+    dpview.currency_list.select([1]) # EUR
     app.show_nwview()
-    app.doc.default_currency = 'EUR'
-    app.check_gui_calls(app.bsheet_gui, ['refresh'])
-    app.check_gui_calls(app.nwgraph_gui, ['refresh'])
-    app.check_gui_calls(app.nwview.pie.view, ['refresh'])
-    # but not if it stays the same
-    app.doc.default_currency = 'EUR'
-    app.check_gui_calls_partial(app.bsheet_gui, not_expected=['refresh'])
+    app.check_gui_calls_partial(app.bsheet_gui, ['refresh'])
+    app.check_gui_calls_partial(app.nwgraph_gui, ['refresh'])
+    app.check_gui_calls_partial(app.nwview.pie.view, ['refresh'])
 
 @with_app(app_cleared_gui_calls)
 def test_mainwindow_move_pane(app):
@@ -139,8 +137,7 @@ def test_ttable_add_and_cancel():
 @with_app(app_cleared_gui_calls)
 def test_save_custom_range(app):
     # Saving a custom range causes the date range selector's view to refresh them.
-    app.drsel.select_custom_date_range()
-    cdrpanel = app.get_current_panel()
+    cdrpanel = app.drsel.invoke_custom_range_panel()
     cdrpanel.slot_index = 1
     cdrpanel.slot_name = 'foo'
     cdrpanel.save()
@@ -158,6 +155,7 @@ def test_show_account():
 def test_stop_editing_on_applying_filter(app):
     # Applying a filter on the filter bar stops table editing.
     tview = app.show_tview()
+    tview.ttable.add() # edit something
     app.clear_gui_calls()
     tview.filter_bar.filter_type = FilterType.Income
     tview.ttable.view.check_gui_calls_partial(['stop_editing'])
@@ -178,6 +176,7 @@ def test_changing_date_range_refreshes_transaction_totals():
 @with_app(app_on_transaction_view)
 def test_stop_editing_on_pane_change(app):
     # To avoid buggy editing (for example, #283), stop all editing before a pane switch occurs.
+    app.ttable.add() # edit something
     app.mw.select_next_view()
     app.check_gui_calls_partial(app.ttable_gui, ['stop_editing'])
 
@@ -267,7 +266,7 @@ def app_load_file_with_bsheet_selected():
     app = TestApp()
     app.show_nwview()
     app.clear_gui_calls()
-    app.doc.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
+    app.mw.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
     return app
 
 @with_app(app_load_file_with_bsheet_selected)
@@ -289,10 +288,11 @@ def app_transaction_between_income_and_expense():
 def test_etable_show_income_account(app):
     # show_transfer_account() correctly refreshes the gui even if the graph type doesn't change.
     income_aview = app.show_account('income')
+    income_aview.etable.edited = income_aview.etable.selected_row # edit something
     app.clear_gui_calls()
     app.etable.show_transfer_account()
     app.link_aview()
-    income_aview.etable.view.check_gui_calls(['stop_editing'])
+    income_aview.etable.view.check_gui_calls_partial(['stop_editing'])
     app.etable.view.check_gui_calls(['update_selection', 'show_selected_row', 'refresh'])
     app.bargraph.view.check_gui_calls(['refresh'])
 
@@ -309,10 +309,11 @@ def app_transaction_between_asset_and_liability():
 def test_etable_show_asset_account(app):
     # show_transfer_account() correctly refreshes the gui even if the graph type doesn't change.
     asset_aview = app.show_account('asset')
+    asset_aview.etable.edited = asset_aview.etable.selected_row # edit something
     app.clear_gui_calls()
     app.etable.show_transfer_account()
     app.link_aview()
-    asset_aview.etable.view.check_gui_calls(['stop_editing'])
+    asset_aview.etable.view.check_gui_calls_partial(['stop_editing'])
     app.etable.view.check_gui_calls(['update_selection', 'show_selected_row', 'refresh'])
     app.balgraph.view.check_gui_calls(['refresh'])
 

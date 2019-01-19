@@ -21,7 +21,6 @@ class BudgetTable(GUITable, TableWithAmountMixin):
         Column('repeat_type', display=trcol("Repeat Type")),
         Column('interval', display=trcol("Interval")),
         Column('account', display=trcol("Account")),
-        Column('target', display=trcol("Target")),
         Column('amount', display=trcol("Amount")),
     ]
 
@@ -43,6 +42,7 @@ class BudgetTable(GUITable, TableWithAmountMixin):
     # --- Public
     def delete(self):
         self.document.delete_budgets(self.selected_budgets)
+        self.mainwindow.revalidate()
 
     def edit(self):
         self.mainwindow.edit_item()
@@ -70,7 +70,6 @@ class BudgetTableRow(Row):
         self._repeat_type = budget.repeat_type_desc
         self._interval = str(budget.repeat_every)
         self._account = budget.account.name
-        self._target = budget.target.name if budget.target else ''
         self._amount = budget.amount
         self._amount_fmt = self.document.format_amount(self._amount)
 
@@ -89,6 +88,5 @@ class BudgetTableRow(Row):
     repeat_type = rowattr('_repeat_type')
     interval = rowattr('_interval')
     account = rowattr('_account')
-    target = rowattr('_target')
     amount = rowattr('_amount_fmt')
 

@@ -1,4 +1,4 @@
-# Copyright 2017 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -11,7 +11,7 @@ from core.trans import tr
 
 from ..exception import FileLoadError
 from ..loader.csv import CsvField, MERGABLE_FIELDS
-from .base import MainWindowGUIObject
+from .base import GUIObject
 
 LAYOUT_PREFERENCE_NAME = 'CSVLayouts'
 FIELD_NAMES = {
@@ -88,7 +88,7 @@ class Layout:
             last_index -= 1
 
 
-class CSVOptions(MainWindowGUIObject):
+class CSVOptions(GUIObject):
     def __init__(self, mainwindow):
         def preference2layout(pref):
             layout = Layout(pref['name'])
@@ -98,7 +98,10 @@ class CSVOptions(MainWindowGUIObject):
             layout.target_account_name = pref.get('target_account')
             return layout
 
-        MainWindowGUIObject.__init__(self, mainwindow)
+        super().__init__()
+        self.mainwindow = mainwindow
+        self.document = mainwindow.document
+        self.app = self.document.app
         self.lines = []
         self._colcount = 0
         self._target_accounts = []
@@ -110,7 +113,9 @@ class CSVOptions(MainWindowGUIObject):
         except Exception: # probably because of corrupted prefs
             self._layouts = []
         self.layout = self._default_layout
-        self.connect()
+
+    def __del__(self):
+        self.save_preferences()
 
     # --- Private
     def _refresh_columns(self):
@@ -136,11 +141,10 @@ class CSVOptions(MainWindowGUIObject):
         target_name = self.layout.target_account_name
         loader.target_account = first(t for t in self._target_accounts if t.name == target_name)
         try:
-            self.mainwindow.load_parsed_file_for_import()
+            return self.mainwindow.load_parsed_file_for_import()
         except FileLoadError as e:
             self.view.show_message(str(e))
-        else:
-            self.view.hide()
+            return None
 
     def delete_selected_layout(self):
         if self.layout is self._default_layout:
@@ -185,6 +189,23 @@ class CSVOptions(MainWindowGUIObject):
         self.mainwindow.loader.rescan(encoding=encoding)
         self._refresh_columns()
         self._refresh_lines()
+
+    def save_preferences(self):
+        def layout2preference(layout):
+            result = {}
+            result['name'] = layout.name
+            # trim trailing None values
+            columns = list(dropwhile(lambda x: x is None, layout.columns[::-1]))[::-1]
+            # None values cannot be put in preferences, change them to an empty string.
+            columns = [nonone(col, '') for col in columns]
+            result['columns'] = columns
+            result['excluded_lines'] = sorted(list(layout.excluded_lines))
+            if layout.target_account_name:
+                result['target_account'] = layout.target_account_name
+            return result
+
+        layouts = list(map(layout2preference, self._layouts))
+        self.app.set_default(LAYOUT_PREFERENCE_NAME, layouts)
 
     def select_layout(self, name):
         if not name:
@@ -259,21 +280,4 @@ class CSVOptions(MainWindowGUIObject):
     def target_account_names(self):
         return [tr('< New Account >')] + [a.name for a in self._target_accounts]
 
-    # --- Events
-    def document_will_close(self):
-        def layout2preference(layout):
-            result = {}
-            result['name'] = layout.name
-            # trim trailing None values
-            columns = list(dropwhile(lambda x: x is None, layout.columns[::-1]))[::-1]
-            # None values cannot be put in preferences, change them to an empty string.
-            columns = [nonone(col, '') for col in columns]
-            result['columns'] = columns
-            result['excluded_lines'] = sorted(list(layout.excluded_lines))
-            if layout.target_account_name:
-                result['target_account'] = layout.target_account_name
-            return result
-
-        layouts = list(map(layout2preference, self._layouts))
-        self.app.set_default(LAYOUT_PREFERENCE_NAME, layouts)
 

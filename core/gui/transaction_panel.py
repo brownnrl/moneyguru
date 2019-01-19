@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -12,14 +12,14 @@ from core.util import first
 from ..model._ccore import AccountList, Split
 from ..model.account import AccountType
 from ..model.transaction import Transaction
-from .base import MainWindowPanel
+from .base import GUIPanel
 from .split_table import SplitTable
 from .completable_edit import CompletableEdit
 
-class PanelWithTransaction(MainWindowPanel):
+class PanelWithTransaction(GUIPanel):
     """Base class for panels working with a transaction"""
     def __init__(self, mainwindow):
-        MainWindowPanel.__init__(self, mainwindow)
+        GUIPanel.__init__(self, mainwindow)
         self.transaction = Transaction(date.today())
         self._selected_splits = []
         # Place to store temporarily created accounts during the editing of the
@@ -98,7 +98,7 @@ class PanelWithTransaction(MainWindowPanel):
 class TransactionPanel(PanelWithTransaction):
     # --- Override
     def _load(self, transaction):
-        self.document.stop_edition()
+        self.mainwindow.stop_editing()
         self.transaction = transaction.replicate()
         self.original = transaction
         self.view.refresh_for_multi_currency()
@@ -106,6 +106,7 @@ class TransactionPanel(PanelWithTransaction):
 
     def _save(self):
         self.document.change_transaction(self.original, self.transaction)
+        self.mainwindow.revalidate()
 
     # --- Public
     def mct_balance(self):
@@ -113,7 +114,7 @@ class TransactionPanel(PanelWithTransaction):
 
         The currency of the new split is the currency of the currently selected split.
         """
-        self.split_table.edition_must_stop()
+        self.split_table.stop_editing()
         split = first(self._selected_splits)
         new_split_currency = self.document.default_currency
         if split is not None and split.amount != 0:

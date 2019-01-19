@@ -1,4 +1,4 @@
-# Copyright 2016 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -7,23 +7,21 @@
 import logging
 import weakref
 
-from core.notify import Repeater
-from core.util import first, minmax
+from core.util import first, minmax, nonone
 from core.trans import tr
 
-from ..const import PaneType
-from ..document import FilterType
+from ..const import PaneType, FilterType
 from ..exception import OperationAborted, FileFormatError
-from ..model.date import inc_month, DateFormat
-from ..model.recurrence import Recurrence, RepeatType
+from ..model._ccore import inc_date
+from ..model.date import RepeatType, DateFormat
+from ..model.recurrence import Recurrence
 from ..model.transaction import txn_matches
 from ..loader import csv, qif, ofx, native
-from .base import GUIObject, MESSAGES_DOCUMENT_CHANGED
+from .base import DocumentGUIObject
 from .search_field import SearchField
 from .date_range_selector import DateRangeSelector
 from .account_lookup import AccountLookup
 from .completion_lookup import CompletionLookup
-from .custom_date_range_panel import CustomDateRangePanel
 from .export_panel import ExportPanel
 from .import_window import ImportWindow
 from .csv_options import CSVOptions
@@ -35,7 +33,6 @@ from .schedule_view import ScheduleView
 from .budget_view import BudgetView
 from .general_ledger_view import GeneralLedgerView
 from .docprops_view import DocPropsView
-from .pluginlist_view import PluginListView
 from .empty_view import EmptyView
 
 PANETYPE2LABEL = {
@@ -46,7 +43,6 @@ PANETYPE2LABEL = {
     PaneType.Budget: tr("Budgets"),
     PaneType.GeneralLedger: tr("General Ledger"),
     PaneType.DocProps: tr("Document Properties"),
-    PaneType.PluginList: tr("Plugin Management"),
     PaneType.Empty: tr("New Tab"),
 }
 
@@ -55,6 +51,7 @@ class Preference:
     SelectedPane = 'SelectedPane'
     HiddenAreas = 'HiddenAreas'
     WindowFrame = 'WindowFrame'
+
 
 class ViewPane:
     def __init__(self, view, label):
@@ -72,7 +69,7 @@ class ViewPane:
             return None
 
 
-class MainWindow(Repeater, GUIObject):
+class MainWindow(DocumentGUIObject):
     # --- model -> view calls:
     # change_current_pane()
     # get_panel_view(model)
@@ -81,21 +78,20 @@ class MainWindow(Repeater, GUIObject):
     # refresh_undo_actions()
     # restore_window_frame(frame)
     # save_window_frame() -> frame
-    # show_custom_date_range_panel()
     # show_message(message)
     # view_closed(index)
     # update_area_visibility()
 
     def __init__(self, document):
-        Repeater.__init__(self, document)
-        GUIObject.__init__(self)
-        self.document = document
-        self.app = document.app
+        super().__init__(document)
+        self._current_pane = None
         self._selected_transactions = []
         self._explicitly_selected_transactions = []
         self._selected_schedules = []
         self._selected_budgets = []
         self._account2visibleentries = {}
+        self._filter_string = ''
+        self._filter_type = None
         self.panes = []
         self.hidden_areas = set()
 
@@ -104,17 +100,20 @@ class MainWindow(Repeater, GUIObject):
         self.account_lookup = AccountLookup(self)
         self.completion_lookup = CompletionLookup(self)
 
-        self.csv_options = CSVOptions(self)
-        self.import_window = ImportWindow(self)
-
-        msgs = MESSAGES_DOCUMENT_CHANGED | {'filter_applied', 'date_range_changed'}
-        self.bind_messages(msgs, self._invalidate_visible_entries)
-
     # --- Private
     def _add_pane(self, pane):
         self.panes.append(pane)
         self.view.refresh_panes()
         self.current_pane_index = len(self.panes) - 1
+
+    def _apply_filter(self):
+        self._invalidate_visible_entries()
+        is_txn_pane = self._current_pane.view.VIEW_TYPE in {PaneType.Transaction, PaneType.Account}
+        if self.filter_string and not is_txn_pane:
+            self.select_pane_of_type(PaneType.Transaction, clear_filter=False)
+        self._current_pane.view.apply_filter()
+        self._invalidate_hidden_panes()
+        self.search_field.refresh()
 
     def _change_current_pane(self, pane):
         if self._current_pane is pane:
@@ -126,11 +125,14 @@ class MainWindow(Repeater, GUIObject):
         self.view.change_current_pane()
         self.update_status_line()
 
-    def _close_irrelevant_account_panes(self):
+    def _close_irrelevant_account_panes(self, close_all=False):
+        # close all is if we want to close all accounts, not only "irrelevant"
+        # ones
         indexes_to_close = []
         for index, pane in enumerate(self.panes):
-            if pane.view.VIEW_TYPE == PaneType.Account and pane.account not in self.document.accounts:
-                indexes_to_close.append(index)
+            if pane.view.VIEW_TYPE == PaneType.Account:
+                if close_all or pane.account not in self.document.accounts:
+                    indexes_to_close.append(index)
         if self.current_pane_index in indexes_to_close:
             self.select_pane_of_type(PaneType.NetWorth)
         for index in reversed(indexes_to_close):
@@ -145,13 +147,19 @@ class MainWindow(Repeater, GUIObject):
 
     def _create_pane_from_plugin(self, plugin):
         plugin_inst = plugin(self)
-        plugin_inst.view.connect()
         return ViewPane(plugin_inst.view, plugin_inst.NAME)
+
+    def _ensure_selection_valid(self):
+        self._explicitly_selected_transactions = [
+            t for t in self._explicitly_selected_transactions
+            if t in self.document.transactions]
+        self._selected_transactions = [
+            t for t in self._selected_transactions
+            if t in self.document.transactions]
 
     def _get_view_for_pane_type(self, pane_type, account):
         if pane_type == PaneType.Account: # we don't cache Account panes
             result = AccountView(self, account)
-            result.connect()
             return result
         for pane in self.panes:
             if pane.view.VIEW_TYPE == pane_type:
@@ -170,14 +178,16 @@ class MainWindow(Repeater, GUIObject):
             result = GeneralLedgerView(self)
         elif pane_type == PaneType.DocProps:
             result = DocPropsView(self)
-        elif pane_type == PaneType.PluginList:
-            result = PluginListView(self)
         elif pane_type == PaneType.Empty:
             result = EmptyView(self)
         else:
             raise ValueError("Cannot create view of type {}".format(pane_type))
-        result.connect()
         return result
+
+    def _invalidate_hidden_panes(self):
+        for pane in self.panes:
+            if pane is not self._current_pane:
+                pane.view.invalidate()
 
     def _invalidate_visible_entries(self):
         self._account2visibleentries = {}
@@ -242,21 +252,12 @@ class MainWindow(Repeater, GUIObject):
         # Replace opened panes with new panes from `pane_data`, which is a [(pane_type, arg)]
         self._current_pane = None
         self._current_pane_index = -1
-        for pane in self.panes:
-            pane.view.disconnect()
         self.panes = []
         for pane_type, arg in pane_data:
-            if pane_type >= PaneType.Plugin:
-                plugin = first(p for p in self.app.get_enabled_plugins() if p.plugin_id() == arg)
-                if plugin is not None:
-                    self.panes.append(self._create_pane_from_plugin(plugin))
-                else:
-                    self.panes.append(self._create_pane(PaneType.NetWorth))
-            else:
-                try:
-                    self.panes.append(self._create_pane(pane_type, account=arg))
-                except ValueError:
-                    self.panes.append(self._create_pane(PaneType.NetWorth))
+            try:
+                self.panes.append(self._create_pane(pane_type, account=arg))
+            except ValueError:
+                self.panes.append(self._create_pane(PaneType.NetWorth))
         self.view.refresh_panes()
         self.current_pane_index = 0
 
@@ -267,15 +268,16 @@ class MainWindow(Repeater, GUIObject):
         self._change_current_pane(newpane)
 
     def _update_area_visibility(self):
-        self.notify('area_visibility_changed')
+        if self._current_pane is not None:
+            self._current_pane.view.update_visibility()
         self.view.update_area_visibility()
 
     def _visible_entries_for_account(self, account):
         date_range = self.document.date_range
         entries = self.document.accounts.entries_for_account(account)
         entries = [e for e in entries if e.date in date_range]
-        query_string = self.document.filter_string
-        filter_type = self.document.filter_type
+        query_string = self.filter_string
+        filter_type = self.filter_type
         if query_string:
             query = self.app.parse_search_query(query_string)
             entries = [e for e in entries if txn_matches(e.transaction, query)]
@@ -302,19 +304,56 @@ class MainWindow(Repeater, GUIObject):
         return entries
 
     # --- Override
+    def _revalidate(self):
+        self.stop_editing()
+        self._invalidate_visible_entries()
+        self._close_irrelevant_account_panes()
+        self._ensure_selection_valid()
+        self.view.refresh_undo_actions()
+        self._current_pane.view.revalidate()
+        # An account might have been renamed. If so, update pane metadata.
+        tochange = first(p for p in self.panes if p.account is not None and p.account.name != p.label)
+        if tochange is not None:
+            tochange.label = tochange.account.name
+            self.view.refresh_panes()
+
     def _view_updated(self):
         self.daterange_selector.refresh()
         self.daterange_selector.refresh_custom_ranges()
-        self.document_restoring_preferences()
-        if self.document.can_restore_from_prefs():
-            # Under Cocoa, document.load_from_xml() is called before the creation of our main
-            # window, which means that all our view children don't receive the
-            # document_restoring_preferences notification. Force it here.
-            self.notify('document_restoring_preferences')
+        self.restore_view()
         if not self.panes:
             self._restore_default_panes()
 
     # --- Public
+    def apply_date_range(self, new_date_range, prev_date_range):
+        self._invalidate_visible_entries()
+        if self._current_pane is not None:
+            view = self._current_pane.view
+            view.apply_date_range(new_date_range, prev_date_range)
+
+    def clear(self):
+        self.document.clear()
+        self.revalidate()
+
+    def close(self):
+        """Cleanup the document and close it.
+
+        Saves preferences and tells GUI elements about the document closing (so that they can save
+        their own preferences if needed).
+        """
+        self.document.close()
+        self.daterange_selector.save_preferences()
+        self._save_preferences()
+        for pane in self.panes:
+            pane.view.save_preferences()
+        if self._current_pane.view.VIEW_TYPE == PaneType.Account:
+            # if our current pane is an account view, we need to hide it for it to save its prefs.
+            # Since account panes are closed with the document, it doesn't matter if we hide them.
+            # However, it's a bit of a kludge and if hide() is called on another type of pane, you
+            # risk getting view refresh bugs under Qt because in there, closing a document doesn't
+            # always mean closing the window (unlike under Cocoa).
+            self._current_pane.view.hide()
+
     def close_pane(self, index):
         if self.pane_count == 1: # don't close the last pane
             return
@@ -328,7 +367,6 @@ class MainWindow(Repeater, GUIObject):
         del self.panes[index]
         if not any(p.view is pane.view for p in self.panes):
             pane.view.save_preferences()
-            pane.view.disconnect()
         self.view.view_closed(index)
         # The index of the current view might have changed
         newindex = self.panes.index(self._current_pane)
@@ -350,12 +388,18 @@ class MainWindow(Repeater, GUIObject):
 
     def export(self):
         accounts = [a for a in self.document.accounts if a.is_balance_sheet_account()]
-        panel = ExportPanel(self.document)
+        panel = ExportPanel(self)
         panel.view = weakref.proxy(self.view.get_panel_view(panel))
         panel.load(accounts)
 
     def jump_to_account(self):
         self.account_lookup.show()
+
+    def load_from_xml(self, filename):
+        self._close_irrelevant_account_panes(close_all=True)
+        self.document.load_from_xml(filename)
+        self.restore_view()
+        self.revalidate()
 
     def load_parsed_file_for_import(self):
         """Load a parsed file for import and trigger the opening of the Import window.
@@ -366,7 +410,10 @@ class MainWindow(Repeater, GUIObject):
         """
         self.loader.load()
         if any(a.is_balance_sheet_account() for a in self.loader.accounts) and self.loader.transactions:
-            self.import_window.show()
+            panel = ImportWindow(self)
+            panel.view = weakref.proxy(self.view.get_panel_view(panel))
+            panel.view.show()
+            return panel
         else:
             raise FileFormatError('This file does not contain any account to import.')
 
@@ -380,7 +427,7 @@ class MainWindow(Repeater, GUIObject):
             # overwrite our selection.
             self.select_pane_of_type(PaneType.Schedule)
             ref = self.selected_transactions[0].replicate()
-            ref.date = inc_month(ref.date, 1)
+            ref.date = inc_date(ref.date, RepeatType.Monthly, 1)
             schedule = Recurrence(ref, RepeatType.Monthly, 1)
             self.selected_schedules = [schedule]
             return self.edit_item()
@@ -462,13 +509,35 @@ class MainWindow(Repeater, GUIObject):
             raise FileFormatError(tr('%s is of an unknown format.') % filename)
         self.loader = loader
         if isinstance(self.loader, csv.Loader):
-            self.csv_options.show()
+            panel = CSVOptions(self)
+            panel.view = weakref.proxy(self.view.get_panel_view(panel))
+            panel.show()
+            return panel
         else:
-            self.load_parsed_file_for_import()
+            return self.load_parsed_file_for_import()
+
+    def redo(self):
+        self.document.redo()
+        self.revalidate()
+
+    def restore_view(self):
+        self.daterange_selector.restore_view()
+        window_frame = self.document.get_default(Preference.WindowFrame)
+        if window_frame:
+            self.view.restore_window_frame(tuple(window_frame))
+        self._restore_opened_panes()
+        self.hidden_areas = set(self.document.get_default(Preference.HiddenAreas, fallback_value=[]))
+        self._update_area_visibility()
+        for pane in self.panes:
+            pane.view.restore_view()
+
+    def save_to_xml(self, filename):
+        self.stop_editing()
+        self.document.save_to_xml(filename)
 
     def select_pane_of_type(self, pane_type, clear_filter=True):
         if clear_filter:
-            self.document.filter_string = ''
+            self.filter_string = ''
         index = first(i for i, p in enumerate(self.panes) if p.view.VIEW_TYPE == pane_type)
         if index is None:
             self._add_pane(self._create_pane(pane_type))
@@ -505,12 +574,20 @@ class MainWindow(Repeater, GUIObject):
     def show_message(self, message):
         self.view.show_message(message)
 
+    def stop_editing(self):
+        if self._current_pane is not None:
+            self._current_pane.view.stop_editing()
+
     def toggle_area_visibility(self, area):
         if area in self.hidden_areas:
             self.hidden_areas.remove(area)
         else:
             self.hidden_areas.add(area)
         self._update_area_visibility()
+
+    def undo(self):
+        self.document.undo()
+        self.revalidate()
 
     def update_status_line(self):
         self.view.refresh_status_line()
@@ -544,11 +621,47 @@ class MainWindow(Repeater, GUIObject):
     def current_pane_index(self, value):
         if value == self._current_pane_index:
             return
-        self.document.stop_edition()
+        self.stop_editing()
         value = minmax(value, 0, len(self.panes)-1)
         pane = self.panes[value]
         self._current_pane_index = value
         self._change_current_pane(pane)
+
+    @property
+    def filter_string(self):
+        """*get/set*. Restrict visible elements in lists to those matching the string.
+
+        When set to an non empty string, it restricts visible transactions/entries in
+        :class:`.TransactionTable` and :class:`.EntryTable` to those matching with the string.
+        """
+        return self._filter_string
+
+    @filter_string.setter
+    def filter_string(self, value):
+        value = nonone(value, '').strip()
+        if value == self._filter_string:
+            return
+        self._filter_string = value
+        self._apply_filter()
+
+    # use FilterType.* consts or None
+    @property
+    def filter_type(self):
+        """*get/set*. Restrict visible elements in lists to those matching the type.
+
+        When set to something else than ``None``, it restricts visible transactions/entries in
+        :class:`.TransactionTable` and :class:`.EntryTable` to those matching having the specified
+        :class:`.FilterType`
+        """
+        return self._filter_type
+
+    @filter_type.setter
+    def filter_type(self, value):
+        if value is self._filter_type:
+            return
+        self.stop_editing()
+        self._filter_type = value
+        self._apply_filter()
 
     @property
     def pane_count(self):
@@ -577,7 +690,8 @@ class MainWindow(Repeater, GUIObject):
     @selected_transactions.setter
     def selected_transactions(self, transactions):
         self._selected_transactions = transactions
-        self.notify('transactions_selected')
+        if self._current_pane is not None:
+            self._current_pane.view.update_transaction_selection(transactions)
 
     @property
     def explicitly_selected_transactions(self):
@@ -593,78 +707,5 @@ class MainWindow(Repeater, GUIObject):
         return self._current_pane.view.status_line
 
     # --- Event callbacks
-    def _undo_stack_changed(self):
-        self.view.refresh_undo_actions()
-
-    account_added = _undo_stack_changed
-
-    def account_changed(self):
-        self._undo_stack_changed()
-        tochange = first(p for p in self.panes if p.account is not None and p.account.name != p.label)
-        if tochange is not None:
-            tochange.label = tochange.account.name
-            self.view.refresh_panes()
-
-    account_deleted = _undo_stack_changed
-    budget_changed = _undo_stack_changed
-    budget_deleted = _undo_stack_changed
-
-    def custom_date_range_selected(self):
-        panel = CustomDateRangePanel(self.document)
-        panel.view = weakref.proxy(self.view.get_panel_view(panel))
-        panel.load()
-
-    def date_range_will_change(self):
-        self.daterange_selector.remember_current_range()
-
-    def date_range_changed(self):
-        self.daterange_selector.refresh()
-
     def document_changed(self):
-        self._close_irrelevant_account_panes()
-        self._undo_stack_changed()
-
-    def document_will_close(self):
-        self._save_preferences()
-        for pane in self.panes:
-            pane.view.save_preferences()
-        if self._current_pane.view.VIEW_TYPE == PaneType.Account:
-            # if our current pane is an account view, we need to hide it for it to save its prefs.
-            # Since account panes are closed with the document, it doesn't matter if we hide them.
-            # However, it's a bit of a kludge and if hide() is called on another type of pane, you
-            # risk getting view refresh bugs under Qt because in there, closing a document doesn't
-            # always mean closing the window (unlike under Cocoa).
-            self._current_pane.view.hide()
-
-    def document_restoring_preferences(self):
-        window_frame = self.document.get_default(Preference.WindowFrame)
-        if window_frame:
-            self.view.restore_window_frame(tuple(window_frame))
-        self._restore_opened_panes()
-        self.hidden_areas = set(self.document.get_default(Preference.HiddenAreas, fallback_value=[]))
-        self._update_area_visibility()
-
-    def filter_applied(self):
-        is_txn_pane = self._current_pane.view.VIEW_TYPE in {PaneType.Transaction, PaneType.Account}
-        if self.document.filter_string and not is_txn_pane:
-            self.select_pane_of_type(PaneType.Transaction, clear_filter=False)
-        self.search_field.refresh()
-
-    def performed_undo_or_redo(self):
-        self._close_irrelevant_account_panes()
-        self.view.refresh_undo_actions()
-
-    def saved_custom_ranges_changed(self):
-        self.daterange_selector.refresh_custom_ranges()
-
-    schedule_changed = _undo_stack_changed
-    schedule_deleted = _undo_stack_changed
-    transaction_changed = _undo_stack_changed
-
-    def transaction_deleted(self):
-        self._explicitly_selected_transactions = []
-        self._selected_transactions = []
-        self._close_irrelevant_account_panes() # after an auto-clean
-        self.view.refresh_undo_actions()
-
-    transactions_imported = _undo_stack_changed
+        self._revalidate()

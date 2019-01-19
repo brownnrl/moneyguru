@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -45,8 +45,8 @@ def test_excluded_accounts_are_cleared_on_clear(app):
     app.add_account()
     app.bsheet.toggle_excluded()
     print(app.doc.excluded_accounts)
-    app.doc.clear() # no segfault
-    app.doc.close() # no segfault
+    app.mw.clear() # no segfault
+    app.mw.close() # no segfault
     # The test doesn't segfault/fail reliably when it should, let's cheat a
     # little bit on the API and confirm that excluded accounts are empty
     assert not app.doc.excluded_accounts
@@ -104,7 +104,7 @@ def test_keep_old_accounts_on_load_failure(app):
     # When a load result in a failure, keep the data that was there previously.
     filename = testdata.filepath('randomfile')
     try:
-        app.doc.load_from_xml(filename)
+        app.mw.load_from_xml(filename)
     except FileFormatError:
         pass
     eq_(app.account_names(), ['Checking'])

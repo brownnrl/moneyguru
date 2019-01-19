@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -7,9 +7,8 @@
 from core.trans import tr
 
 from .bar_graph import BarGraph
-from .base import SheetViewNotificationsMixin
 
-class ProfitGraph(BarGraph, SheetViewNotificationsMixin):
+class ProfitGraph(BarGraph):
     def __init__(self, profit_view):
         BarGraph.__init__(self, profit_view)
 
@@ -28,16 +27,11 @@ class ProfitGraph(BarGraph, SheetViewNotificationsMixin):
         cash_flow = -sum(
             getentries(a).cash_flow(date_range, self.document.default_currency)
             for a in accounts)
-        budgeted_amount = self.document.budgeted_amount_for_target(None, date_range)
+        budgeted_amount = self.document.budgeted_amount(date_range)
         return cash_flow + budgeted_amount
 
     def _is_reverted(self):
         return True
-
-    # --- Event Handlers
-    def accounts_excluded(self):
-        self.compute()
-        self.view.refresh()
 
     # --- Properties
     @property

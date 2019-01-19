@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -13,10 +13,9 @@ from .selectable_list import LinkedSelectableList
 
 class DocPropsView(BaseView):
     VIEW_TYPE = PaneType.DocProps
-    INVALIDATING_MESSAGES = {'document_changed'}
 
     def __init__(self, mainwindow):
-        BaseView.__init__(self, mainwindow)
+        super().__init__(mainwindow)
         WEEKDAYS = [
             tr("Monday"),
             tr("Tuesday"),
@@ -32,7 +31,7 @@ class DocPropsView(BaseView):
         self.first_weekday_list = LinkedSelectableList(items=WEEKDAYS, setfunc=setfunc)
 
         def setfunc(index):
-            self.document.ahead_months = index
+            self.mainwindow.daterange_selector.ahead_months = index
         self.ahead_months_list = LinkedSelectableList(items=list(map(str, range(12))), setfunc=setfunc)
         MONTHS = [
             tr("January"),
@@ -50,7 +49,7 @@ class DocPropsView(BaseView):
         ]
 
         def setfunc(index):
-            self.document.year_start_month = index + 1
+            self.mainwindow.daterange_selector.year_start_month = index + 1
         self.year_start_month_list = LinkedSelectableList(items=MONTHS, setfunc=setfunc)
 
         def setfunc(index):
@@ -64,8 +63,5 @@ class DocPropsView(BaseView):
         except IndexError:
             pass
         self.first_weekday_list.select(self.document.first_weekday)
-        self.ahead_months_list.select(self.document.ahead_months)
-        self.year_start_month_list.select(self.document.year_start_month - 1)
-
-    # --- Events
-    document_changed = _revalidate
+        self.ahead_months_list.select(self.mainwindow.daterange_selector.ahead_months)
+        self.year_start_month_list.select(self.mainwindow.daterange_selector.year_start_month - 1)

@@ -1,6 +1,4 @@
-# Created By: Virgil Dupras
-# Created On: 2010-05-10
-# Copyright 2015 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -13,18 +11,18 @@ from .account_panel import AccountPanel
 from .account_reassign_panel import AccountReassignPanel
 
 class AccountSheetView(BaseView):
-    INVALIDATING_MESSAGES = BaseView.INVALIDATING_MESSAGES | {'area_visibility_changed'}
     SAVENAME = ''
-
-    def __init__(self, mainwindow):
-        BaseView.__init__(self, mainwindow)
-        self.bind_messages(self.INVALIDATING_MESSAGES, self._revalidate)
-        # Set self.sheet, self.graph and self.pie in subclasses init
+    # Set self.sheet, self.graph and self.pie in subclasses init
 
     # --- Overrides
     def _revalidate(self):
-        BaseView._revalidate(self)
-        self.view.update_visibility()
+        super()._revalidate()
+        self.sheet.refresh()
+        self.graph._revalidate()
+        self.pie._revalidate()
+
+    def apply_date_range(self, new_date_range, prev_date_range):
+        self._revalidate()
 
     def restore_subviews_size(self):
         if self.graph.view_size[1]:
@@ -34,6 +32,10 @@ class AccountSheetView(BaseView):
         self.graph_height_to_restore = self.document.get_default(prefname, 0)
         prefname = '{}.PieWidth'.format(self.SAVENAME)
         self.pie_width_to_restore = self.document.get_default(prefname, 0)
+
+    def restore_view(self):
+        super().restore_view()
+        self.sheet.restore_view()
 
     def save_preferences(self):
         self.sheet.save_preferences()
@@ -47,10 +49,17 @@ class AccountSheetView(BaseView):
             prefname = '{}.PieWidth'.format(self.SAVENAME)
             self.document.set_default(prefname, width)
 
+    def toggle_accounts_exclusion(self, accounts):
+        self.document.toggle_accounts_exclusion(accounts)
+        self._revalidate()
+
+    def update_visibility(self):
+        self.view.update_visibility()
+
     # --- Public
     def collapse_group(self, group):
         group.expanded = False
-        self.notify('group_expanded_state_changed')
+        self.pie._revalidate()
 
     def delete_item(self):
         self.sheet.delete()
@@ -65,7 +74,7 @@ class AccountSheetView(BaseView):
 
     def expand_group(self, group):
         group.expanded = True
-        self.notify('group_expanded_state_changed')
+        self.pie._revalidate()
 
     def get_account_reassign_panel(self):
         panel = AccountReassignPanel(self.mainwindow)
@@ -78,6 +87,12 @@ class AccountSheetView(BaseView):
     def new_group(self):
         self.sheet.add_account_group()
 
+    def show(self):
+        super().show()
+        self.view.update_visibility()
+
     def show_account(self):
         self.sheet.show_selected_account()
 
+    def stop_editing(self):
+        self.sheet.cancel_edits()

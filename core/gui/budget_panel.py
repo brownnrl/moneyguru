@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -13,7 +13,7 @@ from core.trans import tr
 from ..exception import OperationAborted
 from ..model.account import sort_accounts
 from ..model.budget import Budget
-from .base import MainWindowPanel
+from .base import GUIPanel
 from .schedule_panel import PanelWithScheduleMixIn, REPEAT_OPTIONS_ORDER
 from .selectable_list import GUISelectableList
 
@@ -30,25 +30,11 @@ class AccountList(GUISelectableList):
     def refresh(self):
         self[:] = [a.name for a in self.panel._accounts]
 
-class TargetList(GUISelectableList):
-    def __init__(self, panel):
-        self.panel = panel
-        GUISelectableList.__init__(self)
-
-    def _update_selection(self):
-        GUISelectableList._update_selection(self)
-        target = self.panel._targets[self.selected_index]
-        self.panel.budget.target = target
-
-    def refresh(self):
-        self[:] = [(a.name if a is not None else tr('None')) for a in self.panel._targets]
-
-class BudgetPanel(MainWindowPanel, PanelWithScheduleMixIn):
+class BudgetPanel(GUIPanel, PanelWithScheduleMixIn):
     def __init__(self, mainwindow):
-        MainWindowPanel.__init__(self, mainwindow)
+        GUIPanel.__init__(self, mainwindow)
         self.create_repeat_type_list()
         self.account_list = AccountList(weakref.proxy(self))
-        self.target_list = TargetList(weakref.proxy(self))
 
     # --- Override
     def _load(self):
@@ -56,10 +42,11 @@ class BudgetPanel(MainWindowPanel, PanelWithScheduleMixIn):
         self._load_budget(budget)
 
     def _new(self):
-        self._load_budget(Budget(None, None, 0, date.today()))
+        self._load_budget(Budget(None, 0, date.today()))
 
     def _save(self):
         self.document.change_budget(self.original, self.budget)
+        self.mainwindow.revalidate()
 
     # --- Private
     def _load_budget(self, budget):
@@ -75,13 +62,8 @@ class BudgetPanel(MainWindowPanel, PanelWithScheduleMixIn):
             msg = tr("Income/Expense accounts must be created before budgets can be set.")
             raise OperationAborted(msg)
         sort_accounts(self._accounts)
-        self._targets = [a for a in self.document.accounts if a.is_balance_sheet_account()]
-        sort_accounts(self._targets)
-        self._targets.insert(0, None)
         self.account_list.refresh()
         self.account_list.select(self._accounts.index(budget.account) if budget.account is not None else 0)
-        self.target_list.refresh()
-        self.target_list.select(self._targets.index(budget.target))
         self.view.refresh_repeat_every()
 
     # --- Properties

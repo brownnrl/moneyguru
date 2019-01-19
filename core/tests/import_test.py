@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -17,9 +17,9 @@ from ..model.date import MonthRange, YearRange
 
 
 def importall(app, filename):
-    app.mw.parse_file_for_import(filename)
-    while app.iwin.panes:
-        app.iwin.import_selected_pane()
+    iwin = app.mw.parse_file_for_import(filename)
+    while iwin.panes:
+        iwin.import_selected_pane()
 
 # --- Pristine
 @with_app(TestApp)
@@ -84,13 +84,13 @@ def test_account_only_qif_is_invalid(app):
 def test_csv_import_tries_default_dateformat_first():
     # When guessing date format in a CSV file, try the default date format first.
     app = TestApp(app=Application(ApplicationGUI(), date_format='yy/dd/MM'))
-    app.mw.parse_file_for_import(testdata.filepath('csv/ambiguous_date.csv'))
-    app.csvopt.set_column_field(0, CsvField.Date)
-    app.csvopt.set_column_field(1, CsvField.Amount)
-    app.csvopt.continue_import()
+    csvopt = app.mw.parse_file_for_import(testdata.filepath('csv/ambiguous_date.csv'))
+    csvopt.set_column_field(0, CsvField.Date)
+    csvopt.set_column_field(1, CsvField.Amount)
+    iwin = csvopt.continue_import()
     # Normally, the dates we test are expected in our default, dd/MM/yyyy, but since we've changed
     # the date format...
-    eq_(app.itable[0].date_import, '01/02/03')
+    eq_(iwin.import_table[0].date_import, '01/02/03')
 
 def test_csv_import_selection_binding():
     app = TestApp(app=Application(ApplicationGUI(), date_format='dd/MM/yy'))
@@ -126,9 +126,9 @@ def test_qif_import_tries_native_dateformat_first():
     # When guessing date format in a QIF file, try the *native* date format first, that is,
     # mm/dd/yy.
     app = TestApp(app=Application(ApplicationGUI(), date_format='dd/MM/yy'))
-    app.mw.parse_file_for_import(testdata.filepath('qif/ambiguous_date.qif'))
+    iwin = app.mw.parse_file_for_import(testdata.filepath('qif/ambiguous_date.qif'))
     # We parsed "01/02/03" with mm/dd/yy
-    eq_(app.itable[0].date_import, '02/01/03')
+    eq_(iwin.import_table[0].date_import, '02/01/03')
 
 @with_app(TestApp)
 def test_import_updates_undo_description(app):
@@ -141,7 +141,7 @@ def test_import_updates_undo_description(app):
 def app_qif_import():
     # One account named 'Account 1' and then an parse_file_for_import() call for the 'checkbook.qif' test file.
     app = TestApp(app=Application(ApplicationGUI(), default_currency='PLN'))
-    app.doc.date_range = YearRange(date(2007, 1, 1))
+    app.drsel.set_date_range(YearRange(date(2007, 1, 1)))
     app.add_account('Account 1')
     app.add_account('Account 1 1')
     importall(app, testdata.filepath('qif', 'checkbook.qif'))
@@ -224,7 +224,7 @@ class TestDoubleOFXImport:
     # files (the same reference number) occurs between the two imports.
     def do_setup(self):
         app = TestApp()
-        app.doc.date_range = MonthRange(date(2008, 2, 1))
+        app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
         importall(app, testdata.filepath('ofx', 'desjardins.ofx'))
         app.show_nwview()
         app.bsheet.selected = app.bsheet.assets[0]
@@ -261,7 +261,7 @@ class TestDoubleOFXImportAcrossSessions:
     # Correctly remember the OFX IDs even if the account name changes.
     def do_setup(self, tmpdir):
         app = TestApp()
-        app.doc.date_range = MonthRange(date(2008, 2, 1))
+        app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
         importall(app, testdata.filepath('ofx', 'desjardins.ofx'))
         app.show_nwview()
         app.bsheet.selected = app.bsheet.assets[0] # 815-30219-11111-EOP
@@ -269,7 +269,7 @@ class TestDoubleOFXImportAcrossSessions:
         app.bsheet.save_edits()
         filename = str(tmpdir.join('foo.xml'))
         app.doc.save_to_xml(filename)
-        app.doc.load_from_xml(filename)
+        app.mw.load_from_xml(filename)
         importall(app, testdata.filepath('ofx', 'desjardins2.ofx'))
         return app
 
@@ -283,7 +283,7 @@ class TestAnotherDoubleOFXImport:
     # Importing two OFX files that contain transactions with the same FIT ID, but a different account ID.
     def do_setup(self):
         app = TestApp()
-        app.doc.date_range = MonthRange(date(2008, 2, 1))
+        app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
         importall(app, testdata.filepath('ofx', 'desjardins2.ofx'))
         importall(app, testdata.filepath('ofx', 'desjardins3.ofx'))
         return app
@@ -310,12 +310,12 @@ class TestTripleOFXImportAcrossSessions:
     # Import the same OFX 3 times
     def do_setup(self, tmpdir):
         app = TestApp()
-        app.doc.date_range = MonthRange(date(2008, 2, 1))
+        app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
         importall(app, testdata.filepath('ofx', 'desjardins.ofx'))
         importall(app, testdata.filepath('ofx', 'desjardins.ofx'))
         filename = str(tmpdir.join('foo.xml'))
         app.doc.save_to_xml(filename)
-        app.doc.load_from_xml(filename)
+        app.mw.load_from_xml(filename)
         importall(app, testdata.filepath('ofx', 'desjardins.ofx'))
         return app
 
@@ -333,7 +333,7 @@ class TestTripleOFXImportAcrossSessions:
 # Import an OFX, change one entry into a split, and then re-import.
 def app_double_ofx_import_with_split_in_the_middle():
     app = TestApp()
-    app.doc.date_range = MonthRange(date(2008, 2, 1))
+    app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
     importall(app, testdata.filepath('ofx', 'desjardins.ofx'))
     app.show_nwview()
     app.bsheet.selected = app.bsheet.assets[0]
@@ -355,7 +355,7 @@ def test_split_wasnt_touched():
     # When matching transaction and encountering a case where the old transaction was changed
     # into a split, bail out and don't touch the amounts.
     app = app_double_ofx_import_with_split_in_the_middle()
-    tpanel = app.get_current_panel()
+    tpanel = app.mw.edit_item()
     stable = tpanel.split_table
     eq_(len(stable), 4)
     eq_(stable[2].credit, '1.00')
@@ -377,14 +377,14 @@ class TestTwoEntriesInRangeSaveThenLoad:
     # Two entries having the same date, in range. The app saves to a file then loads the same file.
     def do_setup(self, tmpdir):
         app = TestApp()
-        app.doc.date_range = MonthRange(date(2007, 10, 1))
+        app.drsel.set_date_range(MonthRange(date(2007, 10, 1)))
         app.add_account()
         app.show_account()
         app.add_entry('1/10/2007', description='first')
         app.add_entry('1/10/2007', description='second')
         filename = str(tmpdir.join('foo.xml'))
         app.doc.save_to_xml(filename)
-        app.doc.load_from_xml(filename)
+        app.mw.load_from_xml(filename)
         # have been kicked back to bsheet. Select the account again
         app.bsheet.selected = app.bsheet.assets[0]
         app.show_account()
@@ -402,7 +402,7 @@ class TestTwoEntriesInRangeSaveThenLoad:
 # ---
 def app_transfer_between_two_referenced_accounts():
     app = TestApp()
-    app.doc.date_range = MonthRange(date(2008, 2, 1))
+    app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
     importall(app, testdata.filepath('moneyguru', 'with_references1.moneyguru')) # Contains Account 1
     app.add_account('Account 4') # Add it as an asset
     app.show_account('Account 1')
@@ -413,11 +413,11 @@ def app_transfer_between_two_referenced_accounts():
     # test that bound amount modification works correctly.
     row.debit = '43'
     app.etable.save_edits()
-    app.mw.parse_file_for_import(testdata.filepath('moneyguru', 'with_references3.moneyguru')) # Contains Account 4
+    app.iwin = app.mw.parse_file_for_import(testdata.filepath('moneyguru', 'with_references3.moneyguru')) # Contains Account 4
     # The entry from Account 4 doesn't match yet because they don't have the same reference, but
     # it will be fixed after the import
     app.iwin.selected_target_account_index = 3 # Account 4
-    app.itable.bind(0, 1)
+    app.iwin.import_table.bind(0, 1)
     app.iwin.import_selected_pane()
     # The 2 entries are now linked in the same txn.
     return app
@@ -425,17 +425,17 @@ def app_transfer_between_two_referenced_accounts():
 @with_app(app_transfer_between_two_referenced_accounts)
 def test_first_side_matches(app):
     # When importing entries from Account 1, these entries are matched correctly
-    app.mw.parse_file_for_import(testdata.filepath('moneyguru', 'with_references1.moneyguru'))
+    iwin = app.mw.parse_file_for_import(testdata.filepath('moneyguru', 'with_references1.moneyguru'))
     # All entries should be matched
-    eq_(len(app.itable), 2) # 2 entries means they all match
+    eq_(len(iwin.import_table), 2) # 2 entries means they all match
 
 @with_app(app_transfer_between_two_referenced_accounts)
 def test_second_side_matches(app):
     # When importing entries from Account 3, these entries are matched correctly
-    app.mw.parse_file_for_import(testdata.filepath('moneyguru', 'with_references3.moneyguru'))
+    iwin = app.mw.parse_file_for_import(testdata.filepath('moneyguru', 'with_references3.moneyguru'))
     # target account should be correct, and all entries should be matched
     eq_(app.iwin.selected_target_account_index, 3) # Account 4
-    eq_(len(app.itable), 1) # 1 entry means they all match
+    eq_(len(iwin.import_table), 1) # 1 entry means they all match
 
 @with_app(app_transfer_between_two_referenced_accounts)
 def test_bound_amount_correctly_imported(app):
@@ -450,7 +450,7 @@ def test_bound_amount_correctly_imported(app):
 class TestImportFileWithMultipleTransferReferences:
     def do_setup(self):
         app = TestApp()
-        app.doc.date_range = MonthRange(date(2008, 2, 1))
+        app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
         importall(app, testdata.filepath('moneyguru', 'multiple_transfer_references.moneyguru'))
         return app
 
@@ -471,8 +471,8 @@ def test_date_format_guessing(tmpdir):
         app = TestApp()
         contents = "!Type:Bank\nD{str_date}\nT42.32\n^".format(str_date=str_date)
         open(filepath, 'wt', encoding='utf-8').write(contents)
-        app.mw.parse_file_for_import(filepath)
-        eq_(app.itable[0].date_import, expected_date)
+        iwin = app.mw.parse_file_for_import(filepath)
+        eq_(iwin.import_table[0].date_import, expected_date)
 
     check('12/20/2010', '20/12/2010')
     check('28/Jun/2010', '28/06/2010')

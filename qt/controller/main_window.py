@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -17,8 +17,12 @@ from core.trans import trget
 from core.const import PaneType, PaneArea
 from core.gui.main_window import MainWindow as MainWindowModel
 from core.gui.custom_date_range_panel import CustomDateRangePanel as CustomDateRangePanelModel
+from core.gui.csv_options import CSVOptions as CSVOptionsModel
+from core.gui.import_window import ImportWindow as ImportWindowModel
 from core.exception import FileFormatError
+from core.document import Document as DocumentModel, ScheduleScope
 
+from ..controller.schedule_scope_dialog import ScheduleScopeDialog
 from ..support.date_range_selector_view import DateRangeSelectorView
 from ..support.recent import Recent
 from ..support.search_edit import SearchEdit
@@ -33,9 +37,7 @@ from .transaction.view import TransactionView
 from .schedule.view import ScheduleView
 from .general_ledger.view import GeneralLedgerView
 from .docprops_view import DocPropsView
-from .pluginlist_view import PluginListView
 from .new_view import NewView
-from .readonly_table_plugin_view import ReadOnlyTablePluginView
 from .lookup import Lookup
 from .export_panel import ExportPanel
 from .custom_date_range_panel import CustomDateRangePanel
@@ -55,7 +57,6 @@ PANETYPE2ICON = {
     PaneType.Budget: 'budget_16',
     PaneType.GeneralLedger: 'gledger_16',
     PaneType.DocProps: 'gledger_16',
-    PaneType.PluginList: '',
 }
 
 PANETYPE2VIEWCLASS = {
@@ -67,36 +68,33 @@ PANETYPE2VIEWCLASS = {
     PaneType.Budget: BudgetView,
     PaneType.GeneralLedger: GeneralLedgerView,
     PaneType.DocProps: DocPropsView,
-    PaneType.PluginList: PluginListView,
     PaneType.Empty: NewView,
-    PaneType.ReadOnlyTablePlugin: ReadOnlyTablePluginView,
 }
 
 # IMPORTANT NOTE ABOUT TABS
 # Why don't we use a QTabWidget? Because it doesn't allow to add the same widget twice.
 
 class MainWindow(QMainWindow):
-    def __init__(self, doc):
+    def __init__(self, app):
         QMainWindow.__init__(self, None)
-        self.doc = doc
-        self.app = doc.app
+        self.documentPath = None
+        self.doc = DocumentModel(app=app.model)
+        self.app = app
 
         self._setupUi()
 
         # Create base elements
-        self.model = MainWindowModel(document=doc.model)
+        self.model = MainWindowModel(document=self.doc)
         self.model2view = {}
         self.alookup = Lookup(self, model=self.model.account_lookup)
         self.clookup = Lookup(self, model=self.model.completion_lookup)
         self.drsel = DateRangeSelector(mainwindow=self, view=self.dateRangeSelectorView)
         self.sfield = SearchField(model=self.model.search_field, view=self.searchLineEdit)
-        self.importWindow = ImportWindow(self)
-        self.csvOptionsWindow = CSVOptionsWindow(self)
         self.recentDocuments = Recent(self.app, 'recentDocuments')
         self.recentDocuments.addMenu(self.menuOpenRecent)
 
+        self.doc.view = self
         self.model.view = self
-        self.model.connect()
 
         self._updateUndoActions()
         self._bindSignals()
@@ -214,8 +212,6 @@ class MainWindow(QMainWindow):
         self.actionShowPreviousView = QAction(tr("Previous View"), self)
         self.actionShowPreviousView.setShortcut("Ctrl+Shift+[")
         self.actionNewDocument = QAction(tr("New Document"), self)
-        self.actionOpenExampleDocument = QAction(tr("Open Example Document"), self)
-        self.actionOpenPluginFolder = QAction(tr("Open Plugin Folder"), self)
         self.actionImport = QAction(tr("Import..."), self)
         self.actionImport.setShortcut("Ctrl+Alt+I")
         self.actionExport = QAction(tr("Export..."), self)
@@ -263,8 +259,6 @@ class MainWindow(QMainWindow):
         self.menuFile.addAction(self.actionNewTab)
         self.menuFile.addAction(self.actionOpenDocument)
         self.menuFile.addAction(self.menuOpenRecent.menuAction())
-        self.menuFile.addAction(self.actionOpenExampleDocument)
-        self.menuFile.addAction(self.actionOpenPluginFolder)
         self.menuFile.addAction(self.actionImport)
         self.menuFile.addSeparator()
         self.menuFile.addAction(self.actionCloseTab)
@@ -326,10 +320,7 @@ class MainWindow(QMainWindow):
         self.graphVisibilityButton.clicked.connect(self.actionToggleGraph.trigger)
         self.piechartVisibilityButton.clicked.connect(self.actionTogglePieChart.trigger)
         self.columnsVisibilityButton.clicked.connect(self.columnsVisibilityButtonClicked)
-        self.recentDocuments.mustOpenItem.connect(self.doc.open)
-        self.doc.documentOpened.connect(self.recentDocuments.insertItem)
-        self.doc.documentSavedAs.connect(self.recentDocuments.insertItem)
-        self.doc.documentPathChanged.connect(self.documentPathChanged)
+        self.recentDocuments.mustOpenItem.connect(self.open)
         self.tabBar.currentChanged.connect(self.currentTabChanged)
         self.tabBar.tabCloseRequested.connect(self.tabCloseRequested)
         self.tabBar.tabMoved.connect(self.tabMoved)
@@ -355,17 +346,15 @@ class MainWindow(QMainWindow):
         self.actionMoveUp.triggered.connect(self.moveUpTriggered)
         self.actionMoveDown.triggered.connect(self.moveDownTriggered)
         self.actionDuplicateTransaction.triggered.connect(self.model.duplicate_item)
-        self.actionUndo.triggered.connect(self.doc.model.undo)
-        self.actionRedo.triggered.connect(self.doc.model.redo)
+        self.actionUndo.triggered.connect(self.model.undo)
+        self.actionRedo.triggered.connect(self.model.redo)
 
         # Open / Save / Import / Export / New
-        self.actionNewDocument.triggered.connect(self.doc.new)
-        self.actionOpenDocument.triggered.connect(self.doc.openDocument)
-        self.actionOpenExampleDocument.triggered.connect(self.doc.openExampleDocument)
-        self.actionOpenPluginFolder.triggered.connect(self.model.app.open_plugin_folder)
+        self.actionNewDocument.triggered.connect(self.new)
+        self.actionOpenDocument.triggered.connect(self.openDocument)
         self.actionImport.triggered.connect(self.importDocument)
-        self.actionSave.triggered.connect(self.doc.save)
-        self.actionSaveAs.triggered.connect(self.doc.saveAs)
+        self.actionSave.triggered.connect(self.save)
+        self.actionSaveAs.triggered.connect(self.saveAs)
         self.actionExport.triggered.connect(self.model.export)
 
         # Misc
@@ -389,7 +378,7 @@ class MainWindow(QMainWindow):
 
     # --- QWidget overrides
     def closeEvent(self, event):
-        if self.doc.confirmDestructiveAction():
+        if self.confirmDestructiveAction():
             event.accept()
         else:
             event.ignore()
@@ -466,20 +455,91 @@ class MainWindow(QMainWindow):
         self.actionToggleAccountExclusion.setEnabled(isSheet)
 
     def _updateUndoActions(self):
-        if self.doc.model.can_undo():
+        if self.doc.can_undo():
             self.actionUndo.setEnabled(True)
-            self.actionUndo.setText(tr("Undo {0}").format(self.doc.model.undo_description()))
+            self.actionUndo.setText(tr("Undo {0}").format(self.doc.undo_description()))
         else:
             self.actionUndo.setEnabled(False)
             self.actionUndo.setText(tr("Undo"))
-        if self.doc.model.can_redo():
+        if self.doc.can_redo():
             self.actionRedo.setEnabled(True)
-            self.actionRedo.setText(tr("Redo {0}").format(self.doc.model.redo_description()))
+            self.actionRedo.setText(tr("Redo {0}").format(self.doc.redo_description()))
         else:
             self.actionRedo.setEnabled(False)
             self.actionRedo.setText(tr("Redo"))
 
     # --- Actions
+    # Document open/save/close
+    def confirmDestructiveAction(self):
+        # Asks whether the user wants to continue before continuing with an action that will replace
+        # the current document. Will save the document as needed. Returns True if the action can
+        # continue.
+        if not self.model.document.is_dirty():
+            return True
+        title = tr("Unsaved Document")
+        msg = tr("Do you want to save your changes before continuing?")
+        buttons = QMessageBox.Save | QMessageBox.Cancel | QMessageBox.Discard
+        result = QMessageBox.question(self.app.mainWindow, title, msg, buttons)
+        if result == QMessageBox.Save:
+            self.save()
+            if self.model.document.is_dirty(): # "save as" was cancelled
+                return False
+            else:
+                return True
+        elif result == QMessageBox.Cancel:
+            return False
+        elif result == QMessageBox.Discard:
+            return True
+
+    def new(self):
+        if not self.confirmDestructiveAction():
+            return
+        self.model.close()
+        self.documentPath = None
+        self.model.clear()
+        self.documentPathChanged()
+
+    def open(self, docpath, initial=False):
+        # initial flag is true when open() is called at the document's initialization. When that's
+        # the case, we need to create a new document when we fail opening this one.
+        if not self.confirmDestructiveAction():
+            return
+        self.model.close()
+        try:
+            self.model.load_from_xml(docpath)
+            self.documentPath = docpath
+        except FileFormatError as e:
+            QMessageBox.warning(self.app.mainWindow, tr("Cannot load file"), str(e))
+            if initial:
+                self.new()
+        self.documentPathChanged()
+        self.recentDocuments.insertItem(docpath)
+
+    def openDocument(self):
+        title = tr("Select a document to load")
+        filters = tr("moneyGuru Documents (*.moneyguru)")
+        docpath, filetype = QFileDialog.getOpenFileName(self.app.mainWindow, title, '', filters)
+        if docpath:
+            self.open(docpath)
+
+    def save(self):
+        if self.documentPath is not None:
+            self.model.save_to_xml(self.documentPath)
+        else:
+            self.saveAs()
+
+    def saveAs(self):
+        title = tr("Save As")
+        filters = tr("moneyGuru Documents (*.moneyguru)")
+        docpath = QFileDialog.getSaveFileName(self.app.mainWindow, title, '', filters)[0]
+        if docpath:
+            if not docpath.endswith('.moneyguru'):
+                docpath += '.moneyguru'
+            self.model.save_to_xml(docpath)
+            self.documentPath = docpath
+            self.documentPathChanged()
+            self.recentDocuments.insertItem(docpath)
+
     # Views
     def showNetWorthTriggered(self):
         self.model.select_pane_of_type(PaneType.NetWorth)
@@ -601,8 +661,8 @@ class MainWindow(QMainWindow):
         self._setTabIndex(index)
 
     def documentPathChanged(self):
-        if self.doc.documentPath:
-            title = "moneyGuru ({})".format(self.doc.documentPath)
+        if self.documentPath:
+            title = "moneyGuru ({})".format(self.documentPath)
         else:
             title = "moneyGuru"
         self.setWindowTitle(title)
@@ -615,6 +675,15 @@ class MainWindow(QMainWindow):
         # If we start a full pane refresh during a drag operation, we segfault.
         self.model.move_pane(fromIndex, toIndex, refresh_panes=False)
 
+    # --- document model --> view
+    def query_for_schedule_scope(self):
+        if QApplication.keyboardModifiers() & Qt.ShiftModifier:
+            return ScheduleScope.Global
+        if not self.app.model.show_schedule_scope_dialog:
+            return ScheduleScope.Local
+        dialog = ScheduleScopeDialog(self)
+        return dialog.queryForScope()
+
     # --- model --> view
     def change_current_pane(self):
         self._setTabIndex(self.model.current_pane_index)
@@ -622,6 +691,10 @@ class MainWindow(QMainWindow):
     def get_panel_view(self, model):
         if isinstance(model, CustomDateRangePanelModel):
             return CustomDateRangePanel(model, self)
+        elif isinstance(model, CSVOptionsModel):
+            return CSVOptionsWindow(model, self)
+        elif isinstance(model, ImportWindowModel):
+            return ImportWindow(model, self, self.app.prefs)
         else:
             return ExportPanel(model, self)
 

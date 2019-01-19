@@ -1,6 +1,4 @@
-# Created By: Virgil Dupras
-# Created On: 2010-01-03
-# Copyright 2015 Hardcoded Software (http://www.hardcoded.net)
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -27,7 +25,7 @@ def test_load_while_on_ytd_range(app):
     # navigable, causing a crash.
     app.drsel.select_year_to_date_range()
     filename = testdata.filepath('moneyguru/payee_description.moneyguru')
-    app.doc.load_from_xml(filename) # no crash
+    app.mw.load_from_xml(filename) # no crash
 
 @with_app(TestApp)
 def test_all_transactions_range(app):
@@ -49,7 +47,7 @@ def test_year_start_month_same_as_ahead_month(app):
     dpview.year_start_month_list.select(11) # I don't think ahead_month's default is every gonna be 11.
     # +1 is because our actual year_start_month is always list-index + 1
     dpview.year_start_month_list.select(dpview.ahead_months_list.selected_index-1)
-    eq_(app.doc.year_start_month, app.doc.ahead_months)
+    eq_(app.drsel.year_start_month, app.drsel.ahead_months)
 
 # ---
 def app_range_on_actober_2007(monkeypatch):
@@ -78,8 +76,7 @@ def test_quarter_range(app):
 
 @with_app(app_range_on_actober_2007)
 def test_select_custom_date_range(app):
-    app.drsel.select_custom_date_range()
-    cdrpanel = app.get_current_panel()
+    cdrpanel = app.drsel.invoke_custom_range_panel()
     cdrpanel.start_date = '09/12/2008'
     cdrpanel.end_date = '18/02/2009'
     cdrpanel.save() # changes the date range
@@ -92,8 +89,7 @@ def test_select_custom_date_range(app):
 def test_select_custom_date_range_without_changing_the_dates(app):
     # When selecting a custom date range that has the same start/end as the previous one, it
     # still causes the change notification (so the DR display changes.
-    app.drsel.select_custom_date_range()
-    cdrpanel = app.get_current_panel()
+    cdrpanel = app.drsel.invoke_custom_range_panel()
     cdrpanel.save()
     eq_(app.doc.date_range.display, '01/10/2007 - 31/10/2007')
 
@@ -287,8 +283,7 @@ def test_running_year_range_with_ahead_months_bounds(app):
 # ---
 def app_custom_date_range():
     app = TestApp()
-    app.drsel.select_custom_date_range()
-    cdrpanel = app.get_current_panel()
+    cdrpanel = app.drsel.invoke_custom_range_panel()
     cdrpanel.start_date = '09/12/2008'
     cdrpanel.end_date = '18/02/2009'
     cdrpanel.save() # changes the date range
@@ -306,7 +301,7 @@ def app_one_entry_year_range_2007():
     app.add_account('Checking')
     app.show_account()
     app.add_entry('10/10/2007', 'Deposit', payee='Payee', transfer='Salary', increase='42.00', checkno='42')
-    app.doc.date_range = YearRange(date(2007, 1, 1))
+    app.drsel.set_date_range(YearRange(date(2007, 1, 1)))
     return app
 
 @with_app(app_one_entry_year_range_2007)
@@ -348,7 +343,7 @@ def test_set_date_out_of_range(app):
 # selected. The range is Yearly, on 2007.
 def app_two_entries_in_different_quarters_with_year_range():
     app = TestApp()
-    app.doc.date_range = YearRange(date(2007, 1, 1))
+    app.drsel.set_date_range(YearRange(date(2007, 1, 1)))
     app.add_account()
     app.show_account()
     app.add_entry('1/1/2007', 'first', increase='1')
@@ -377,7 +372,7 @@ def two_entries_in_two_months_range_on_second():
     app.show_account()
     app.add_entry('3/9/2007', 'first', increase='102.00')
     app.add_entry('10/10/2007', 'second', increase='42.00')
-    app.doc.date_range = MonthRange(date(2007, 10, 1))
+    app.drsel.set_date_range(MonthRange(date(2007, 10, 1)))
     # When the second entry was added, the date was in the previous date range, making the
     # entry go *before* the Previous Entry, but we want the selection to be on the second item
     app.etable.select([1])
@@ -386,7 +381,7 @@ def two_entries_in_two_months_range_on_second():
 @with_app(two_entries_in_two_months_range_on_second)
 def test_next_date_range_goes_up_a_month(app):
     # drsel.select_next_date_range() makes the date range go one month later.
-    app.doc.date_range = MonthRange(date(2007, 9, 1))
+    app.drsel.set_date_range(MonthRange(date(2007, 9, 1)))
     app.drsel.select_next_date_range()
     eq_(app.doc.date_range, MonthRange(date(2007, 10, 1)))
 

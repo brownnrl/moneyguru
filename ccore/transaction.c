@@ -108,21 +108,6 @@ _txn_assign_imbalance(
     }
 }
 
-static int
-_txn_qsort_cmp(const void *a, const void *b)
-{
-    Transaction *t1 = *((Transaction **)a);
-    Transaction *t2 = *((Transaction **)b);
-
-    if (t1->date != t2->date) {
-        return t1->date < t2->date ? -1 : 1;
-    }
-    if (t1->position != t2->position) {
-        return t1->position < t2->position ? -1 : 1;
-    }
-    return 0;
-}
-
 /* Public */
 void
 transaction_init(Transaction *txn, TransactionType type, time_t date)
@@ -509,18 +494,21 @@ transaction_print(const Transaction *txn)
     }
 }
 
-void
+bool
 transaction_reassign_account(
     Transaction *txn,
     const Account *account,
-    Account *reassign_to)
+    Account *to)
 {
+    bool res = false;
     for (unsigned int i=0; i<txn->splitcount; i++) {
         Split *s = &txn->splits[i];
         if (s->account == account) {
-            split_account_set(s, reassign_to);
+            split_account_set(s, to);
+            res = true;
         }
     }
+    return res;
 }
 
 bool
@@ -558,60 +546,3 @@ transaction_resize_splits(Transaction *txn, unsigned int newsize)
     txn->splitcount = newsize;
 }
 
-void
-transactions_init(TransactionList *txns)
-{
-    txns->count = 0;
-    txns->txns = NULL;
-}
-
-void
-transactions_deinit(TransactionList *txns)
-{
-    for (int i=0; i<txns->count; i++) {
-        Transaction *txn = txns->txns[i];
-        transaction_deinit(txn);
-        free(txn);
-    }
-    free(txns->txns);
-}
-
-Transaction*
-transactions_create(TransactionList *txns)
-{
-    txns->count++;
-    txns->txns = realloc(txns->txns, sizeof(Transaction*) * txns->count);
-    Transaction *res = calloc(1, sizeof(Transaction));
-    txns->txns[txns->count-1] = res;
-    return res;
-}
-
-bool
-transactions_remove(TransactionList *txns, Transaction *txn)
-{
-    int index = -1;
-    for (int i=0; i<txns->count; i++) {
-        if (txns->txns[i] == txn) {
-            index = i;
-            break;
-        }
-    }
-    if (index == -1) {
-        // bad pointer
-        return false;
-    }
-    // we have to move memory around
-    memmove(
-        &txns->txns[index],
-        &txns->txns[index+1],
-        sizeof(Transaction*) * (txns->count - index - 1));
-    txns->count--;
-    txns->txns = realloc(txns->txns, sizeof(Transaction*) * txns->count);
-    return true;
-}
-
-void
-transactions_sort(TransactionList *txns)
-{
-    qsort(txns->txns, txns->count, sizeof(Transaction*), _txn_qsort_cmp);
-}

@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -7,12 +7,11 @@
 import weakref
 
 from core.trans import tr
-from ..const import PaneType
-from ..document import FilterType
+from ..const import PaneType, FilterType
 from ..model.account import AccountType
 from ..model.amount import convert_amount
 from ..model.transaction import txn_matches
-from .base import BaseView, MESSAGES_DOCUMENT_CHANGED
+from .base import BaseView
 from .filter_bar import FilterBar
 from .mass_edition_panel import MassEditionPanel
 from .transaction_table import TransactionTable
@@ -20,7 +19,7 @@ from .transaction_print import TransactionPrint
 from .transaction_panel import TransactionPanel
 
 
-class ViewWithTransactionsMixin:
+class TransactionViewBase(BaseView):
     def edit_selected_transactions(self):
         editable_txns = [txn for txn in self.mainwindow.selected_transactions if not txn.is_budget]
         if len(editable_txns) > 1:
@@ -34,32 +33,65 @@ class ViewWithTransactionsMixin:
             panel.load(editable_txns[0])
             return panel
 
+    # --- Virtuals
+    def _invalidate_cache(self):
+        pass
 
-class TransactionView(BaseView, ViewWithTransactionsMixin):
+    def _refresh_totals(self):
+        pass
+
+    # --- Overrides
+    def _revalidate(self):
+        self._invalidate_cache()
+        self.table.refresh_and_show_selection()
+        self._refresh_totals()
+
+    def apply_date_range(self, new_date_range, prev_date_range):
+        self._revalidate()
+
+    def apply_filter(self):
+        self._revalidate()
+
+    def restore_view(self):
+        super().restore_view()
+        self.table.restore_view()
+
+    # --- Public
+    def delete_item(self):
+        self.table.delete()
+
+    def duplicate_item(self):
+        self.table.duplicate_selected()
+
+    def edit_item(self):
+        return self.edit_selected_transactions()
+
+    def new_item(self):
+        self.table.add()
+
+    def stop_editing(self):
+        self.table.cancel_edits()
+
+
+class TransactionView(TransactionViewBase):
     VIEW_TYPE = PaneType.Transaction
     PRINT_TITLE_FORMAT = tr('Transactions from {start_date} to {end_date}')
     PRINT_VIEW_CLASS = TransactionPrint
-    INVALIDATING_MESSAGES = MESSAGES_DOCUMENT_CHANGED | {'filter_applied', 'date_range_changed'}
 
     def __init__(self, mainwindow):
-        BaseView.__init__(self, mainwindow)
+        super().__init__(mainwindow)
         self._visible_transactions = None
         self.filter_bar = FilterBar(self)
-        self.ttable = TransactionTable(self)
+        self.ttable = self.table = TransactionTable(self)
         self.maintable = self.ttable
         self.columns = self.maintable.columns
-        self.set_children([self.ttable])
+        self.restore_subviews_size()
 
     def _revalidate(self):
-        self._visible_transactions = None
-        self._refresh_totals()
+        TransactionViewBase._revalidate(self)
         self.filter_bar.refresh()
 
     # --- Private
-    def _invalidate_cache(self):
-        self._visible_transactions = None
-        self._refresh_totals()
-
     def _refresh_totals(self):
         selected = len(self.mainwindow.selected_transactions)
         total = len(self.visible_transactions)
@@ -72,8 +104,8 @@ class TransactionView(BaseView, ViewWithTransactionsMixin):
     def _set_visible_transactions(self):
         date_range = self.document.date_range
         txns = [t for t in self.document.oven.transactions if t.date in date_range]
-        query_string = self.document.filter_string
-        filter_type = self.document.filter_type
+        query_string = self.mainwindow.filter_string
+        filter_type = self.mainwindow.filter_type
         if not query_string and filter_type is None:
             self._visible_transactions = txns
             return
@@ -97,27 +129,25 @@ class TransactionView(BaseView, ViewWithTransactionsMixin):
         self._visible_transactions = txns
 
     # --- Override
+    def _invalidate_cache(self):
+        self._visible_transactions = None
+
     def save_preferences(self):
         self.ttable.columns.save_columns()
 
+    def show(self):
+        super().show()
+        self.ttable.show()
+
+    def update_transaction_selection(self, transactions):
+        self._refresh_totals()
+
     # --- Public
-    def delete_item(self):
-        self.ttable.delete()
-
-    def duplicate_item(self):
-        self.ttable.duplicate_selected()
-
-    def edit_item(self):
-        return self.edit_selected_transactions()
-
     def move_down(self):
         self.ttable.move_down()
 
     def move_up(self):
         self.ttable.move_up()
-
-    def new_item(self):
-        self.ttable.add()
 
     def show_account(self):
         self.ttable.show_from_account()
@@ -128,30 +158,3 @@ class TransactionView(BaseView, ViewWithTransactionsMixin):
         if self._visible_transactions is None:
             self._set_visible_transactions()
         return self._visible_transactions
-
-    # --- Event Handlers
-    def date_range_changed(self):
-        self._invalidate_cache()
-
-    def document_changed(self):
-        self._invalidate_cache()
-
-    def filter_applied(self):
-        self._invalidate_cache()
-        self.filter_bar.refresh()
-
-    def performed_undo_or_redo(self):
-        self._invalidate_cache()
-
-    def transactions_selected(self):
-        self._refresh_totals()
-
-    def transaction_changed(self):
-        self._invalidate_cache()
-
-    def transaction_deleted(self):
-        self._invalidate_cache()
-
-    def transactions_imported(self):
-        self._invalidate_cache()
-

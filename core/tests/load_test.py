@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -22,7 +22,7 @@ def test_dont_save_invalid_xml_characters(tmpdir):
     app.add_txn(description="foo\0bar")
     filepath = str(tmpdir.join('foo.xml'))
     app.doc.save_to_xml(filepath)
-    app.doc.load_from_xml(filepath) # no exception
+    app.mw.load_from_xml(filepath) # no exception
     eq_(app.ttable[0].description, "foo bar")
 
 def test_saved_file_starts_with_xml_header(tmpdir):
@@ -42,7 +42,7 @@ class TestLoadFile:
         monkeypatch.patch_today(2008, 2, 20) # so that the entries are shown
         app = TestApp()
         app.add_account() # This is to set the modified flag to true so we can make sure it has been put back to false
-        app.doc.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
+        app.mw.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
         app.show_nwview()
         app.bsheet.selected = app.bsheet.assets[0]
         app.show_account()
@@ -98,12 +98,14 @@ class TestLoadFile:
 
     @with_app(do_setup)
     def test_edit_entry(self, app):
-        # When about to save the document, if an entry is in edition, the document saves the edits first
+        # When about to save the document, if an entry is being edited, we
+        # cancel the edit.
         app.etable[0].description = 'foo'
-        app.doc.stop_edition()
-        assert app.doc.is_dirty() # We started editing, the flag is on
-        app.etable.save_edits()
-        assert app.doc.is_dirty()
+        app.mw.stop_editing()
+        assert not app.doc.is_dirty() # Nothing was changed
+        eq_(app.etable[0].description, 'Entry 1')
+        app.etable.save_edits() # nothing is being scheduled for saving
+        assert not app.doc.is_dirty()
 
     @with_app(do_setup)
     def test_initial_selection(self, app):
@@ -134,9 +136,9 @@ class TestLoadFile:
 class TestLoadTwice:
     def do_setup(self):
         app = TestApp()
-        app.doc.date_range = MonthRange(date(2008, 2, 1))
-        app.doc.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
-        app.doc.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
+        app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
+        app.mw.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
+        app.mw.load_from_xml(testdata.filepath('moneyguru', 'simple.moneyguru'))
         return app
 
     @with_app(do_setup)
@@ -151,8 +153,8 @@ class TestLoadMultiCurrency:
     def do_setup(self):
         # Loads 'multi_currency.moneyguru', a file with 2 accounts and a multi-currency transaction.
         app = TestApp()
-        app.doc.date_range = MonthRange(date(2008, 2, 1))
-        app.doc.load_from_xml(testdata.filepath('moneyguru', 'multi_currency.moneyguru'))
+        app.drsel.set_date_range(MonthRange(date(2008, 2, 1)))
+        app.mw.load_from_xml(testdata.filepath('moneyguru', 'multi_currency.moneyguru'))
         app.show_nwview()
         app.bsheet.selected = app.bsheet.assets[0]
         app.show_account()
@@ -176,8 +178,8 @@ class TestLoadMultiCurrency:
 class TestLoadPayeeDescription:
     def do_setup(self):
         app = TestApp()
-        app.doc.date_range = MonthRange(date(2008, 3, 1))
-        app.doc.load_from_xml(testdata.filepath('moneyguru', 'payee_description.moneyguru'))
+        app.drsel.set_date_range(MonthRange(date(2008, 3, 1)))
+        app.mw.load_from_xml(testdata.filepath('moneyguru', 'payee_description.moneyguru'))
         app.show_tview()
         return app
 
@@ -222,7 +224,7 @@ class TestLoadInvalidAccountType:
     def do_setup(self):
         #Loads 'invalid_account_type.moneyguru' which contains a single account with an invalid type.
         app = TestApp()
-        app.doc.load_from_xml(testdata.filepath('moneyguru', 'invalid_account_type.moneyguru'))
+        app.mw.load_from_xml(testdata.filepath('moneyguru', 'invalid_account_type.moneyguru'))
         return app
 
     @with_app(do_setup)
@@ -236,13 +238,13 @@ class TestLoadImportWithTransactionInTheFuture:
     def do_setup(self, monkeypatch):
         monkeypatch.patch_today(2008, 2, 1) # before any txn date
         app = TestApp()
-        app.mw.parse_file_for_import(testdata.filepath('moneyguru', 'simple.moneyguru'))
+        app.iwin = app.mw.parse_file_for_import(testdata.filepath('moneyguru', 'simple.moneyguru'))
         return app
 
     @with_app(do_setup)
     def test_transactions_show_up(self, app):
         # even when there are txns in the future, they show up in the import panel
-        eq_(len(app.itable), 2)
+        eq_(len(app.iwin.import_table), 2)
 
 
 class TestLoadWithReferences1:
@@ -250,7 +252,7 @@ class TestLoadWithReferences1:
         # Loads 'with_references1.moneyguru' which also have boolean (y/n) reconciliation attributes.
         monkeypatch.patch_today(2008, 2, 1) # before any txn date
         app = TestApp()
-        app.doc.load_from_xml(testdata.filepath('moneyguru', 'with_references1.moneyguru'))
+        app.mw.load_from_xml(testdata.filepath('moneyguru', 'with_references1.moneyguru'))
         return app
 
     @with_app(do_setup)
@@ -269,7 +271,7 @@ def app_account_with_budget():
     app = TestApp()
     app.add_account('asset')
     app.add_account('income', account_type=AccountType.Income)
-    app.add_budget('income', 'asset', '400')
+    app.add_budget('income', '400')
     bpanel = app.mainwindow.edit_item()
     bpanel.notes = 'foobar'
     bpanel.save()
@@ -354,7 +356,8 @@ def app_one_account_in_one_group():
 def app_budget_with_all_fields_set():
     app = TestApp()
     app.add_account('income', account_type=AccountType.Income)
-    app.add_budget('income', None, '100', start_date='01/01/2009', repeat_type_index=3,
+    app.add_budget(
+        'income', '100', start_date='01/01/2009', repeat_type_index=3,
         repeat_every=2, stop_date='01/01/2022')
     return app
 
@@ -420,10 +423,10 @@ def test_save_load(tmpdir, monkeypatch):
     def check(app):
         filepath = str(tmpdir.join('foo.xml'))
         app.doc.save_to_xml(filepath)
-        app.doc.close()
+        app.mw.close()
         newapp = TestApp()
-        newapp.doc.load_from_xml(filepath)
-        newapp.doc.date_range = app.doc.date_range
+        newapp.mw.load_from_xml(filepath)
+        newapp.drsel.set_date_range(app.doc.date_range)
         newapp.doc._cook()
         compare_apps(app.doc, newapp.doc)
 
@@ -486,12 +489,12 @@ def test_save_load_qif(tmpdir):
         expanel = app.get_current_panel()
         expanel.export_path = filepath
         expanel.save()
-        app.doc.close()
+        app.mw.close()
         newapp = TestApp()
-        newapp.mw.parse_file_for_import(filepath)
-        while newapp.iwin.panes:
-            newapp.iwin.import_selected_pane()
-        newapp.doc.date_range = app.doc.date_range
+        iwin = newapp.mw.parse_file_for_import(filepath)
+        while iwin.panes:
+            iwin.import_selected_pane()
+        newapp.drsel.set_date_range(app.doc.date_range)
         newapp.doc._cook()
         compare_apps(app.doc, newapp.doc, qif_mode=True)
 
@@ -514,7 +517,7 @@ class TestLoadOffCurrencyReconciliations:
     def do_setup(self, monkeypatch):
         monkeypatch.patch_today(2015, 10, 26) # so that the entries are shown
         app = TestApp()
-        app.doc.load_from_xml(testdata.filepath('moneyguru', 'off_currency_reconciliations.moneyguru'))
+        app.mw.load_from_xml(testdata.filepath('moneyguru', 'off_currency_reconciliations.moneyguru'))
         app.show_nwview()
         app.bsheet.selected = app.bsheet.assets[0]
         app.show_account()

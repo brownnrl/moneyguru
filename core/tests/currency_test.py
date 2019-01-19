@@ -1,4 +1,4 @@
-# Copyright 2018 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -77,7 +77,7 @@ def app_one_empty_account_eur(monkeypatch):
     app = TestApp()
     app.add_account('Checking', 'EUR')
     app.show_account()
-    app.doc.date_range = MonthRange(date(2007, 10, 1))
+    app.drsel.set_date_range(MonthRange(date(2007, 10, 1)))
     return app
 
 @with_app(app_one_empty_account_eur)
@@ -175,7 +175,7 @@ def app_entry_with_foreign_currency():
     app.bsheet.selected = app.bsheet.assets[0]
     app.show_account()
     app.add_entry(date='1/10/2007', transfer='second', increase='42 eur')
-    app.doc.date_range = MonthRange(date(2007, 10, 1))
+    app.drsel.set_date_range(MonthRange(date(2007, 10, 1)))
     return app
 
 def test_bar_graph_data():
@@ -202,8 +202,8 @@ def test_ensures_rates(tmpdir, fake_server, monkeypatch):
     rates_db = Currencies.get_rates_db()
     monkeypatch.setattr(rates_db, 'ensure_rates', log_calls(rates_db.ensure_rates))
     filename = str(tmpdir.join('foo.xml'))
-    app.doc.save_to_xml(filename)
-    app.doc.load_from_xml(filename)
+    app.mw.save_to_xml(filename)
+    app.mw.load_from_xml(filename)
     calls = rates_db.ensure_rates.calls
     eq_(len(calls), 1)
     eq_(set(calls[0]['currencies']), set(['PLN', 'EUR', 'CAD']))
@@ -268,7 +268,7 @@ class TestCaseDifferentCurrencies:
         # make sure currency information is correctly saved/loaded
         app = self.app
         newapp = app.save_and_load()
-        newapp.doc.date_range = app.doc.date_range
+        newapp.drsel.set_date_range(app.doc.date_range)
         newapp.doc._cook()
         compare_apps(app.doc, newapp.doc)
 
