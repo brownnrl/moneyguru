@@ -97,27 +97,28 @@ def test_csv_import_selection_binding():
     # 1. Open without_some_transactions.moneyguru
     app.doc.load_from_xml(testdata.filepath('moneyguru', 'check_import_selection_binding.moneyguru'))
     # 2. Start an import of sample_import.csv
-    app.mw.parse_file_for_import(testdata.filepath('csv/check_import_selection_binding.csv'))
-    app.csvopt.selected_target_index = 1
-    app.csvopt.set_line_excluded(0, True)
-    app.csvopt.set_column_field(1, CsvField.Date)
-    app.csvopt.set_column_field(2, CsvField.Description)
-    app.csvopt.set_column_field(5, CsvField.Transfer)
-    app.csvopt.set_column_field(6, CsvField.Amount)
-    app.csvopt.continue_import()
+    csvopt = app.mw.parse_file_for_import(testdata.filepath('csv/check_import_selection_binding.csv'))
+    csvopt.selected_target_index = 1
+    csvopt.set_line_excluded(0, True)
+    csvopt.set_column_field(1, CsvField.Date)
+    csvopt.set_column_field(2, CsvField.Description)
+    csvopt.set_column_field(5, CsvField.Transfer)
+    csvopt.set_column_field(6, CsvField.Amount)
+    iwin = csvopt.continue_import()
     # 3. Bind txn 1 to txn 1, txn 2 to txn 2
-    app.itable.bind(0, 1)
-    app.itable.bind(1, 2)
+    itable = iwin.import_table
+    itable.bind(0, 1)
+    itable.bind(1, 2)
     # 4. Deselect txn 3 for import
-    app.itable[2].will_import = False
+    itable[2].will_import = False
     # 5. Bind txn 4 to txn 4
-    app.itable.bind(3, 4)
-    pass_will_import_after_binding = not app.itable[2].will_import
+    itable.bind(3, 4)
+    pass_will_import_after_binding = not itable[2].will_import
     # 6. Deselect txn 3 for import
-    app.itable[2].will_import = False
+    itable[2].will_import = False
     # 7. Break the binding of txn 4
-    app.itable.unbind(3)
-    pass_will_import_after_unbinding = not app.itable[2].will_import
+    itable.unbind(3)
+    pass_will_import_after_unbinding = not itable[2].will_import
 
     eq_(pass_will_import_after_binding, True, "Does not maintain import status after binding")
     eq_(pass_will_import_after_unbinding, True, "Does not maintain import status after breaking binding")
