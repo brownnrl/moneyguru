@@ -7,6 +7,8 @@
 from datetime import date
 
 from pytest import raises
+
+from core.model.account import AccountType
 from .testutil import eq_
 
 from .base import ApplicationGUI, TestApp, with_app, testdata
@@ -93,11 +95,18 @@ def test_csv_import_tries_default_dateformat_first():
     eq_(iwin.import_table[0].date_import, '01/02/03')
 
 def test_csv_import_selection_binding():
-    app = TestApp(app=Application(ApplicationGUI(), date_format='dd/MM/yy'))
+    app = TestApp()
     # 1. Open without_some_transactions.moneyguru
-    app.doc.load_from_xml(testdata.filepath('moneyguru', 'check_import_selection_binding.moneyguru'))
+    app.add_account('A',         account_type=AccountType.Asset)
+    app.add_account('income 1',  account_type=AccountType.Income)
+    app.add_account('expense 1', account_type=AccountType.Expense)
+    app.add_account('expense 2', account_type=AccountType.Expense)
+    app.add_txn('15/01/2019', 'txn 1', from_='income 1', to='A', amount='1.00')
+    app.add_txn('16/01/2019', 'txn 2', from_='A', to='expense 1', amount='1.00')
+    app.add_txn('18/01/2019', 'txn 3', from_='A', to='Checking', amount='1.00')
     # 2. Start an import of sample_import.csv
     csvopt = app.mw.parse_file_for_import(testdata.filepath('csv/check_import_selection_binding.csv'))
+    # Select Account A as target for import
     csvopt.selected_target_index = 1
     csvopt.set_line_excluded(0, True)
     csvopt.set_column_field(1, CsvField.Date)
@@ -113,15 +122,10 @@ def test_csv_import_selection_binding():
     itable[2].will_import = False
     # 5. Bind txn 4 to txn 4
     itable.bind(3, 4)
-    pass_will_import_after_binding = not itable[2].will_import
-    # 6. Deselect txn 3 for import
-    itable[2].will_import = False
-    # 7. Break the binding of txn 4
+    assert not itable[2].will_import, "Does not maintain import status after binding"
+    # 6. Break the binding of txn 4
     itable.unbind(3)
-    pass_will_import_after_unbinding = not itable[2].will_import
-
-    eq_(pass_will_import_after_binding, True, "Does not maintain import status after binding")
-    eq_(pass_will_import_after_unbinding, True, "Does not maintain import status after breaking binding")
+    assert not itable[2].will_import, "Does not maintain import status after breaking binding"
 
 def test_qif_import_tries_native_dateformat_first():
     # When guessing date format in a QIF file, try the *native* date format first, that is,
