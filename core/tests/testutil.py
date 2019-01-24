@@ -130,7 +130,6 @@ class TestApp:
         return gui
 
 
-# To use @with_app, you have to import pytest_funcarg__app in your conftest.py file.
 def with_app(setupfunc):
     def decorator(func):
         func.setupfunc = setupfunc
