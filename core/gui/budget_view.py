@@ -11,9 +11,8 @@ from ..const import PaneType
 from .base import BaseView
 from .budget_table import BudgetTable
 from .budget_panel import BudgetPanel
-from .schedule_panel import WithScheduleMixIn, REPEAT_OPTIONS_ORDER
 
-class BudgetView(BaseView, WithScheduleMixIn):
+class BudgetView(BaseView):
     # --- model -> view calls:
     # get_panel_view(panel_model) -> view
     # refresh()
@@ -25,17 +24,11 @@ class BudgetView(BaseView, WithScheduleMixIn):
 
     def __init__(self, mainwindow):
         super().__init__(mainwindow)
-        self.schedule = mainwindow.document.budgets # for WithScheduleMixIn
         self.table = BudgetTable(self)
-        self.create_repeat_type_list()
         self.restore_subviews_size()
 
     def _revalidate(self):
         self.table.refresh_and_show_selection()
-        self._refresh_repeat_types()
-        self.repeat_type_list.select(REPEAT_OPTIONS_ORDER.index(self.schedule.repeat_type))
-        self.view.refresh_repeat_every()
-        self.view.refresh()
 
     # --- Override
     def save_preferences(self):

@@ -57,6 +57,9 @@ class Action:
         self.added_budgets = set()
         self.changed_budgets = {}
         self.deleted_budgets = set()
+        self.added_budget_plan = set()
+        self.changed_budget_plan = set()
+        self.deleted_budget_plan = set()
 
     def change_accounts(self, accounts):
         """Record imminent changes to ``accounts``."""

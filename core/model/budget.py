@@ -16,6 +16,31 @@ from .date import DateRange, ONE_DAY
 from .recurrence import get_repeat_type_desc, Spawn, DateCounter, RepeatType
 from .transaction import Transaction
 
+
+class BudgetPlan:
+    """A new budget plan created when the user wants to start budgeting.
+
+    A budget provides a way to define a new budget.  It holds the intent to start budgeting from
+    a start date, the budget cycle time span (before the difference carry report resets),
+     and how many periods that this cycle should be split.
+
+    The default will be 1 year budget cycles with 12 monthly budget periods.
+
+    This structure is responsible for generating `.Budget` and modifying objects in the
+    `.BudgetList` whenever these settings change.  For example, if a user changes the start date
+    for their budget or the number of budget periods, any effects will be moderated through the
+    `.BudgetPlan`.
+
+
+    .. seealso:: :doc:`/forecast`
+    """
+    def __init__(self, cycle_start_date, cycle_duration_repeat, budget_period_repeat):
+        self.start_date = cycle_start_date
+        self.repeat_type = cycle_duration_repeat
+        self.budget_period_repeat = budget_period_repeat
+
+
+
 class Budget:
     """Regular budget for a specific account.
 
@@ -37,13 +62,15 @@ class Budget:
 
     .. seealso:: :doc:`/forecast`
     """
-    def __init__(self, account, amount):
+    def __init__(self, account, amount, start_date, end_date):
         #: :class:`.Account` for which we budget. Has to be an income or expense.
         self.account = account
         #: The :class:`.Amount` we budget for our time span.
         self.amount = amount
+        self.start_date = start_date
+        self.end_date = end_date
         #: ``str``. Freeform notes from the user.
-        self.notes = ''
+        self.notes = '' # TODO: Do we want to support individual notes on budgets?  I think so.
         self._previous_spawns = []
 
     def __repr__(self):

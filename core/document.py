@@ -10,6 +10,7 @@ import uuid
 import logging
 import os
 import os.path as op
+from calendar import monthrange
 from functools import wraps
 
 from core.util import nonone, allsame, dedupe, extract, first, flatten
@@ -23,7 +24,7 @@ from .model._ccore import AccountList, Entry, TransactionList
 from .model.account import Group, GroupList, AccountType
 from .model.amount import parse_amount, format_amount
 from .model.currency import Currencies
-from .model.budget import BudgetList
+from .model.budget import BudgetList, Budget, BudgetPlan
 from .model.date import YearRange
 from .model.oven import Oven
 from .model.undo import Undoer, Action
@@ -85,6 +86,7 @@ class Document(GUIObject):
         # same
         self.schedules = []
         self.budgets = BudgetList()
+        self.budget_plan = None
         self.oven = Oven(self.accounts, self.transactions, self.schedules, self.budgets)
         self.step = 1
         #: Set of accounts that are currently in "excluded" state.
@@ -672,14 +674,52 @@ class Document(GUIObject):
         budgeted_amount = sum(-b.amount_for_date_range(date_range, currency=currency) for b in budgets)
         return budgeted_amount
 
+    def change_budget_plan(self, budget_plan):
+        """Changes the current budget plan, either start date, period division, or cycle.
+
+        This is used by the :class:`.BudgetPanel`, and ``new`` is originally a copy of ``original``
+        which has been changed.  The original will store the :class:`.BudgetList` and all original
+        budget items.
+
+        :param budget_plan: :class:`.Budget`
+        :param new: :class:`.Budget`
+        """
+        if self.budget_plan is not None and budget_plan.start_date == self.budget_plan.start_date:
+            return
+        delete_budgets = [b for b in self.budgets[:] if b.start_date >= budget_plan.start_date]
+        action = Action(tr('Change Budget Plan'))
+        if self.budget_plan is not None:
+            action.deleted_budget_plan = {self.budget_plan}
+        action.added_budget_plan = {budget_plan}
+        new_budgets = []
+        # collect up all our expenses
+        expenses = [a for a in self.accounts if a.type == AccountType.Expense]
+        # TODO: Change to generalize
+        # for now, we model all budgets as per month, 1 year reset
+        sd = budget_plan.start_date
+        cd = datetime.datetime(day=1, month=sd.month, year=sd.year) # current date
+        for i in range(12):
+            days_in_month = monthrange(cd.year, cd.month)[1]
+            last_day_of_month = datetime.datetime(day=days_in_month, month=cd.month, year=cd.year)
+            for e in expenses:
+                new_budgets.append(Budget(e, 0, cd, last_day_of_month))
+            cd = cd + datetime.timedelta(days=days_in_month)
+        # Remove all of the budgets that occur after the original start day
+        action.deleted_budgets |= set(delete_budgets)
+        action.added_budgets |= set(new_budgets)
+        for budget in delete_budgets:
+            self.budgets.remove(budget)
+        for budget in new_budgets:
+            self.budgets.append(budget)
+        self._undoer.record(action)
+        min_date = min(self.budgets.start_date, datetime.date.today())
+        self.budget_plan = budget_plan
+        self._cook(from_date=min_date)
+
     def change_budget(self, original, new):
         """Changes the attributes of ``original`` so that they match those of ``new``.
 
-        This is used by the :class:`.BudgetPanel`, and ``new`` is originally a copy of ``original``
-        which has been changed.
-
-        :param original: :class:`.Budget`
-        :param new: :class:`.Budget`
+        This is used by the :class:`.BudgetView`, to modify a single budget period value.
         """
         if original in self.budgets:
             action = Action(tr('Change Budget'))

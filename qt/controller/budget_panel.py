@@ -6,21 +6,18 @@
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QVBoxLayout, QFormLayout, QLabel, QLineEdit, QComboBox, QPlainTextEdit,
-    QDialogButtonBox
-)
+    QVBoxLayout, QFormLayout, QLabel,
+    QDialogButtonBox)
 
 from core.trans import trget
-
+from ..support.date_edit import DateEdit
 from .panel import Panel
-from .selectable_list import ComboboxModel
 
 tr = trget('ui')
 
 class BudgetPanel(Panel):
     FIELDS = [
-        ('amountEdit', 'amount'),
-        ('notesEdit', 'notes'),
+        ('startDateEdit', 'start_date'),
     ]
     PERSISTENT_NAME = 'budgetPanel'
 
@@ -29,7 +26,12 @@ class BudgetPanel(Panel):
         self.setAttribute(Qt.WA_DeleteOnClose)
         self._setupUi()
         self.model = model
-        self.accountComboBox = ComboboxModel(model=self.model.account_list, view=self.accountComboBoxView)
+
+        # TODO: Solve dual recurrence problem
+        """
+        self.repeatTypeComboBox = ComboboxModel(
+            model=self.model.repeat_type_list, view=self.repeatTypeComboBoxView)
+        """
 
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
@@ -41,23 +43,31 @@ class BudgetPanel(Panel):
         self.verticalLayout = QVBoxLayout(self)
         self.formLayout = QFormLayout()
         self.formLayout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        self.accountComboBoxView = QComboBox(self)
-        self.formLayout.setWidget(0, QFormLayout.FieldRole, self.accountComboBoxView)
-        self.label_3 = QLabel(tr("Account:"))
-        self.formLayout.setWidget(0, QFormLayout.LabelRole, self.label_3)
-        self.amountEdit = QLineEdit(self)
-        self.amountEdit.setMaximumWidth(120)
-        self.formLayout.setWidget(1, QFormLayout.FieldRole, self.amountEdit)
-        self.label_5 = QLabel(tr("Amount:"))
-        self.formLayout.setWidget(1, QFormLayout.LabelRole, self.label_5)
-        self.notesEdit = QPlainTextEdit(tr("Notes:"))
-        self.formLayout.setWidget(2, QFormLayout.FieldRole, self.notesEdit)
-        self.label = QLabel(self)
-        self.formLayout.setWidget(2, QFormLayout.LabelRole, self.label)
+        self.label_1 = QLabel(tr("Start Date:"))
+        self.formLayout.setWidget(0, QFormLayout.LabelRole, self.label_1)
+        self.startDateEdit = DateEdit(self)
+        self.startDateEdit.setMaximumWidth(120)
+        self.label_1.setBuddy(self.startDateEdit)
+        self.formLayout.setWidget(0, QFormLayout.FieldRole, self.startDateEdit)
+        """
+        self.label_2 = QLabel(tr("Budget Cycle:"))
+        self.formLayout.setWidget(1, QFormLayout.LabelRole, self.label_2)
+        self.repeatTypeComboBoxView = QComboBox(self)
+        self.label_2.setBuddy(self.repeatTypeComboBoxView)
+        self.formLayout.setWidget(1, QFormLayout.FieldRole, self.repeatTypeComboBoxView)
+        self.label_3 = QLabel(tr("Budget Periods:"))
+        self.formLayout.setWidget(2, QFormLayout.LabelRole, self.label_3)
+        self.repeatEverySpinBox = QSpinBox(self)
+        self.repeatEverySpinBox.setMinimum(1)
+        self.label_3.setBuddy(self.repeatEverySpinBox)
+        self.formLayout.addWidget(self.repeatEverySpinBox)
+        self.repeatEveryDescLabel = QLabel(self)
+        # TODO: figure how to add this to formlayout, maybe hbox the spinbox + label?
+        self.verticalLayout.addWidget(self.repeatEveryDescLabel)
+        """
         self.verticalLayout.addLayout(self.formLayout)
         self.buttonBox = QDialogButtonBox(self)
         self.buttonBox.setOrientation(Qt.Horizontal)
         self.buttonBox.setStandardButtons(QDialogButtonBox.Cancel|QDialogButtonBox.Save)
         self.verticalLayout.addWidget(self.buttonBox)
-        self.label_3.setBuddy(self.accountComboBoxView)
-        self.label_5.setBuddy(self.amountEdit)
+
