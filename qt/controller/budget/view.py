@@ -5,7 +5,7 @@
 # http://www.gnu.org/licenses/gpl-3.0.html
 
 from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QAbstractItemView, QComboBox, QLabel, QSpinBox)
+    QVBoxLayout, QHBoxLayout, QAbstractItemView, QComboBox, QLabel, QSpinBox, QPushButton)
 
 from core.trans import trget
 
@@ -53,6 +53,8 @@ class BudgetView(BaseView):
         topLayout.addWidget(self.repeatEverySpinBox)
         self.repeatEveryDescLabel = QLabel(self)
         topLayout.addWidget(self.repeatEveryDescLabel)
+        self.saveBudgetPlanChanges = QPushButton(tr("Save"), self)
+        topLayout.addWidget(self.saveBudgetPlanChanges)
         topLayout.addItem(horizontalSpacer())
         self.verticalLayout.addLayout(topLayout)
         self.tableView = TableView(self)

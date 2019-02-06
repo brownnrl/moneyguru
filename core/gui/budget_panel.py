@@ -3,7 +3,7 @@
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
 # http://www.gnu.org/licenses/gpl-3.0.html
-
+from datetime import datetime
 import weakref
 
 from core.util import first
@@ -39,7 +39,7 @@ class BudgetPanel(GUIPanel):
         self._load_budget(budget)
 
     def _new(self):
-        self._load_budget(Budget(None, 0))
+        self._load_budget(Budget(None, 0, datetime.today()))
 
     def _save(self):
         self.document.change_budget(self.original, self.budget)

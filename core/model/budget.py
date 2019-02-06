@@ -3,14 +3,14 @@
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
 # http://www.gnu.org/licenses/gpl-3.0.html
-
+from collections import defaultdict
 from datetime import date
 
 from core.util import extract
 
 from .amount import prorate_amount
 from .date import DateRange, ONE_DAY
-from .recurrence import Recurrence, Spawn, DateCounter, RepeatType
+from .recurrence import Recurrence, Spawn, DateCounter, RepeatType, get_repeat_type_desc
 from .transaction import Transaction
 
 def BudgetSpawn(*args, **kwargs):
@@ -171,3 +171,29 @@ class BudgetList(list):
         budgeted_amount = self.amount_for_account(account, date_range, currency)
         return account.normalize_amount(budgeted_amount)
 
+    def get_spawns(self, until_date, txns):
+        if not self:
+            return []
+        start_date = self.start_date
+        repeat_type = self.repeat_type
+        repeat_every = self.repeat_every
+        # TODO: getter methods shouldn't change anything
+        # This is just here until we can modify tests
+        # And make the "universal budgeting periods"
+        # work with the recurrence revert
+        for budget in self:
+            budget.start_date = start_date
+            budget.repeat_type = repeat_type
+            budget.repeat_every = repeat_every
+        result = []
+        # It's possible to have 2 budgets overlapping in date range and having the same account
+        # When it happens, we need to keep track of which budget "consume" which txns
+        account2consumedtxns = defaultdict(set)
+        for budget in self:
+            #if not budget.amount:
+            #    continue
+            consumedtxns = account2consumedtxns[budget.account]
+            spawns = budget.get_spawns(until_date, txns, consumedtxns)
+            spawns = [spawn for spawn in spawns if not spawn.is_null]
+            result += spawns
+        return result

@@ -86,8 +86,8 @@ def test_delete_account_and_reassign(app):
 def app_income_with_budget_in_past(monkeypatch):
     monkeypatch.patch_today(2009, 11, 16)
     app = TestApp()
-    app.add_account('income', account_type=AccountType.Income)
-    app.add_budget('income', '100', start_date='01/09/2009')
+    app.add_account('expense', account_type=AccountType.Expense)
+    app.add_budget('expense', '100', start_date='01/09/2009')
     return app
 
 @with_app(app_income_with_budget_in_past)
