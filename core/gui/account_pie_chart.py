@@ -9,7 +9,7 @@
 
 from collections import defaultdict
 from core.trans import tr
-from ..model.account import AccountType
+from ..const import AccountType
 from .pie_chart import PieChart
 
 class _AccountPieChart(PieChart):
@@ -27,9 +27,8 @@ class _AccountPieChart(PieChart):
         data = defaultdict(int)
         for account, amount in account_data:
             name = account.name
-            group = self.document.groups.group_of_account(account)
-            if group and not group.expanded:
-                name = group.name
+            if account.groupname and not self.parent_view.is_group_expanded(account.groupname, account.type):
+                name = account.groupname
             data[name] += amount
         return data
 

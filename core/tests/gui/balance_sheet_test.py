@@ -13,7 +13,7 @@ from ..testutil import eq_
 from ..base import DocumentGUI, ApplicationGUI, TestApp, with_app, testdata
 from ...app import Application
 from ...document import Document
-from ...model.account import AccountType
+from ...const import AccountType
 from ...model.date import MonthRange
 from ...model.currency import Currencies
 
@@ -71,7 +71,8 @@ def test_add_group(app):
     eq_(app.bsheet.selected, app.bsheet.liabilities[0])
     eq_(app.bsheet.liabilities[0].name, 'New group')
     assert app.bsheet.liabilities[0].is_group
-    assert app.doc.is_dirty()
+    # Creating a group doesn't affect the document
+    assert not app.doc.is_dirty()
 
 @with_app(TestApp)
 def test_add_group_with_total_node_selected(app):

@@ -8,13 +8,33 @@ from datetime import date
 
 from core.util import extract
 
-from .amount import prorate_amount
+from ._ccore import inc_date
 from .date import DateRange, ONE_DAY
 from .recurrence import Recurrence, Spawn, DateCounter, RepeatType, get_repeat_type_desc
 from .transaction import Transaction
 
 def BudgetSpawn(*args, **kwargs):
     return Spawn(*args, txntype=3, **kwargs)
+
+def prorate_amount(amount, spread_over_range, wanted_range):
+    """Returns the prorated part of ``amount`` spread over ``spread_over_range`` for the ``wanted_range``.
+
+    For example, if 100$ are spead over a range that lasts 10 days (let's say between the 10th and
+    the 20th) and that there's an overlap of 4 days between ``spread_over_range`` and
+    ``wanted_range`` (let's say the 16th and the 26th), the result will be 40$. Why? Because each
+    day is worth 10$ and we're wanting the value of 4 of those days.
+
+    :param amount: :class:`Amount`
+    :param spread_over_range: :class:`.DateRange`
+    :param wanted_range: :class:`.DateRange`
+    """
+    if not spread_over_range:
+        return 0
+    intersect = spread_over_range & wanted_range
+    if not intersect:
+        return 0
+    rate = intersect.days / spread_over_range.days
+    return amount * rate
 
 class Budget(Recurrence):
     """Regular budget for a specific account.
@@ -197,3 +217,4 @@ class BudgetList(list):
             spawns = [spawn for spawn in spawns if not spawn.is_null]
             result += spawns
         return result
+

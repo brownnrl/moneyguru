@@ -4,14 +4,13 @@
 # which should be included with this package. The terms are also available at
 # http://www.gnu.org/licenses/gpl-3.0.html
 
-import sys
 import os.path as op
 import xml.etree.cElementTree as ET
 
-from ..model.amount import format_amount
+from ..model._ccore import amount_format
 from core.util import remove_invalid_xml, ensure_folder
 
-def save(filename, document_id, properties, accounts, groups, transactions, schedules, budgets):
+def save(filename, document_id, properties, accounts, transactions, schedules, budgets):
     def date2str(date):
         return date.strftime('%Y-%m-%d')
 
@@ -41,7 +40,7 @@ def save(filename, document_id, properties, accounts, groups, transactions, sche
             split_element = ET.SubElement(transaction_element, 'split')
             attrib = split_element.attrib
             attrib['account'] = split.account_name
-            attrib['amount'] = format_amount(split.amount)
+            attrib['amount'] = amount_format(split.amount)
             setattrib(attrib, 'memo', split.memo)
             setattrib(attrib, 'reference', split.reference)
             if split.reconciliation_date is not None:
@@ -53,11 +52,6 @@ def save(filename, document_id, properties, accounts, groups, transactions, sche
     for name, value in properties.items():
         value = str(value)
         props_element.attrib[name] = value
-    for group in groups:
-        group_element = ET.SubElement(root, 'group')
-        attrib = group_element.attrib
-        attrib['name'] = group.name
-        attrib['type'] = group.type
     for account in accounts:
         account_element = ET.SubElement(root, 'account')
         attrib = account_element.attrib
@@ -102,7 +96,7 @@ def save(filename, document_id, properties, accounts, groups, transactions, sche
         attrib['account'] = budget.account.name
         attrib['type'] = budgets.repeat_type
         attrib['every'] = str(budgets.repeat_every)
-        attrib['amount'] = format_amount(budget.amount)
+        attrib['amount'] = amount_format(budget.amount)
         attrib['notes'] = budget.notes
         attrib['start_date'] = date2str(budgets.start_date)
     for elem in root.iter():
@@ -113,8 +107,4 @@ def save(filename, document_id, properties, accounts, groups, transactions, sche
     ensure_folder(op.dirname(filename))
     fp = open(filename, 'wt', encoding='utf-8')
     fp.write('<?xml version="1.0" encoding="utf-8"?>\n')
-    # This 'unicode' encoding thing is only available (and necessary) from Python 3.2
-    if sys.version_info[1] >= 2:
-        tree.write(fp, encoding='unicode')
-    else:
-        tree.write(fp)
+    tree.write(fp, encoding='unicode')

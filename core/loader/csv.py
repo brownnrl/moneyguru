@@ -1,4 +1,4 @@
-# Copyright 2017 Virgil Dupras
+# Copyright 2019 Virgil Dupras
 #
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
@@ -10,6 +10,7 @@ import logging
 from core.util import stripfalse
 from core.trans import tr
 
+from ..const import AccountType
 from ..exception import FileFormatError, FileLoadError
 from . import base
 
@@ -104,7 +105,7 @@ class Loader(base.Loader):
         lines_to_load = []
         for line in lines:
             line = line[:]
-            cleaned_str_date = self.clean_date(line[date_index])
+            cleaned_str_date = base.clean_date(line[date_index])
             if cleaned_str_date is None:
                 logging.warning('{0} is not a date. Ignoring line'.format(line[date_index]))
             else:
@@ -125,7 +126,7 @@ class Loader(base.Loader):
                 index = ci[attr]
                 value = line[index]
                 try:
-                    self.parse_amount(value, self.default_currency)
+                    base.parse_amount(value, self.default_currency)
                 except ValueError:
                     raise FileLoadError(tr("The Amount column has been set on a column that doesn't contain amounts."))
 
@@ -147,15 +148,17 @@ class Loader(base.Loader):
         hasamount = (CsvField.Amount in ci) or (CsvField.Increase in ci and CsvField.Decrease in ci)
         if not (hasdate and hasamount):
             raise FileLoadError(tr("The Date and Amount columns must be set."))
-        self.account_info.name = 'CSV Import'
+        target_account = self.accounts.create(
+            'CSV Import', self.default_currency, AccountType.Asset)
         self.parsing_date_format, lines_to_load = self._parse_date_format(lines, ci)
         self._check_amount_values(lines_to_load, ci)
         for line in lines_to_load:
-            self.start_transaction()
+            info = base.TransactionInfo()
+            info.account = target_account.name
             for attr, index in ci.items():
                 value = line[index]
                 if attr == CsvField.Date:
-                    value = self.parse_date_str(value, self.parsing_date_format)
+                    value = base.parse_date_str(value, self.parsing_date_format)
                 elif attr == CsvField.Increase:
                     attr = CsvField.Amount
                 elif attr == CsvField.Decrease:
@@ -165,7 +168,10 @@ class Loader(base.Loader):
                 if isinstance(value, str):
                     value = value.strip()
                 if value:
-                    setattr(self.transaction_info, attr, value)
+                    setattr(info, attr, value)
+            if info.is_valid():
+                txn = info.load(self.accounts)
+                self.transactions.add(txn)
 
     # --- Public
     def rescan(self, encoding=None):

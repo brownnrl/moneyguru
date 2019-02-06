@@ -11,14 +11,14 @@ from operator import attrgetter
 from ..app import Application, PreferenceNames
 from ..document import Document, ScheduleScope
 from ..exception import FileFormatError
-from ..const import PaneType
+from ..const import AccountType, PaneType
 from ..gui.base import GUIObject
 from ..gui.completable_edit import CompletableEdit
 from ..gui.main_window import MainWindow
 from ..gui.account_panel import AccountPanel
 from ..loader import base
-from ..model.account import AccountType, ACCOUNT_SORT_KEY
-from ..model.amount import parse_amount
+from ..model.sort import ACCOUNT_SORT_KEY
+from ..model._ccore import amount_parse
 from ..model.date import DateFormat
 from ..util import flatten
 from .testutil import eq_, CallLogger, TestApp as TestAppBase, TestData
@@ -145,15 +145,16 @@ class DictLoader(base.Loader):
 
     def _load(self):
         for info in self.infos:
-            self.account_info.name = info['name']
-            self.account_info.reference = info.get('reference')
+            account = base.get_account(self.accounts, info['name'], None)
+            account.change(reference=info.get('reference'))
             for txn in info['txns']:
-                self.start_transaction()
+                info = base.TransactionInfo()
+                info.account = account.name
                 for attr, value in txn.items():
                     if attr == 'date':
-                        value = self.parse_date_str(value)
-                    setattr(self.transaction_info, attr, value)
-            self.flush_account()
+                        value = base.parse_date_str(value, self.parsing_date_format)
+                    setattr(info, attr, value)
+                self.transactions.add(info.load(self.accounts))
 
 class TestApp(TestAppBase):
     __test__ = False
@@ -304,10 +305,22 @@ class TestApp(TestAppBase):
         self.etable.save_edits()
 
     def add_group(self, name=None, account_type=AccountType.Asset):
-        group = self.doc.new_group(account_type)
+        if account_type in {AccountType.Income, AccountType.Expense}:
+            view = self.show_pview()
+            if account_type == AccountType.Expense:
+                view.sheet.selected = view.sheet.expenses
+            else:
+                view.sheet.selected = view.sheet.income
+        else:
+            view = self.show_nwview()
+            if account_type == AccountType.Liability:
+                view.sheet.selected = view.sheet.liabilities
+            else:
+                view.sheet.selected = view.sheet.assets
+        view.sheet.add_account_group()
         if name is not None:
-            self.doc.change_group(group, name=name)
-        self.mw.revalidate()
+            view.sheet.selected.name = name
+            view.sheet.save_edits()
 
     def add_schedule(self, start_date=None, description='', account=None, amount='0',
             repeat_type_index=0, repeat_every=1, stop_date=None):
@@ -683,15 +696,6 @@ def compare_apps(first, second, qif_mode=False):
             except AssertionError:
                 raise
 
-    eq_(len(first.groups), len(second.groups))
-    group_pairs = list(zip(sorted(first.groups, key=attrgetter('name')),
-        sorted(second.groups, key=attrgetter('name'))))
-    for group1, group2 in group_pairs:
-        try:
-            eq_(group1.name, group2.name)
-            eq_(group1.type, group2.type)
-        except AssertionError:
-            raise
     eq_(len(first.accounts), len(second.accounts))
     account_pairs = list(zip(sorted(first.accounts, key=attrgetter('name')),
         sorted(second.accounts, key=attrgetter('name'))))
@@ -761,4 +765,4 @@ def print_table(table, extra_attrs=[]):
 # class. Amount initializer was still widely used in tests, however and for
 # that purpose, this adapter was created.
 def Amount(val, currency):
-    return parse_amount('{} {}'.format(val, currency))
+    return amount_parse('{} {}'.format(val, currency))

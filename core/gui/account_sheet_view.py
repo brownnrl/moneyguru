@@ -14,6 +14,10 @@ class AccountSheetView(BaseView):
     SAVENAME = ''
     # Set self.sheet, self.graph and self.pie in subclasses init
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._expanded_groups = set()
+
     # --- Overrides
     def _revalidate(self):
         super()._revalidate()
@@ -57,8 +61,8 @@ class AccountSheetView(BaseView):
         self.view.update_visibility()
 
     # --- Public
-    def collapse_group(self, group):
-        group.expanded = False
+    def collapse_group(self, groupname, grouptype):
+        self._expanded_groups.discard((groupname, grouptype))
         self.pie._revalidate()
 
     def delete_item(self):
@@ -72,14 +76,17 @@ class AccountSheetView(BaseView):
             account_panel.load(selected_account)
             return account_panel
 
-    def expand_group(self, group):
-        group.expanded = True
+    def expand_group(self, groupname, grouptype):
+        self._expanded_groups.add((groupname, grouptype))
         self.pie._revalidate()
 
     def get_account_reassign_panel(self):
         panel = AccountReassignPanel(self.mainwindow)
         panel.view = weakref.proxy(self.view.get_panel_view(panel))
         return panel
+
+    def is_group_expanded(self, groupname, grouptype):
+        return (groupname, grouptype) in self._expanded_groups
 
     def new_item(self):
         self.sheet.add_account()

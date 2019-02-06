@@ -7,9 +7,8 @@
 import weakref
 
 from core.trans import tr
-from ..const import PaneType, FilterType
-from ..model.account import AccountType
-from ..model.amount import convert_amount
+from ..const import PaneType, FilterType, AccountType
+from ..model._ccore import amount_convert
 from ..model.transaction import txn_matches
 from .base import BaseView
 from .filter_bar import FilterBar
@@ -96,7 +95,7 @@ class TransactionView(TransactionViewBase):
         selected = len(self.mainwindow.selected_transactions)
         total = len(self.visible_transactions)
         currency = self.document.default_currency
-        total_amount = sum(convert_amount(t.amount, currency, t.date) for t in self.mainwindow.selected_transactions)
+        total_amount = sum(amount_convert(t.amount, currency, t.date) for t in self.mainwindow.selected_transactions)
         total_amount_fmt = self.document.format_amount(total_amount)
         msg = tr("{0} out of {1} selected. Amount: {2}")
         self.status_line = msg.format(selected, total, total_amount_fmt)
@@ -110,7 +109,7 @@ class TransactionView(TransactionViewBase):
             self._visible_transactions = txns
             return
         if query_string:
-            query = self.app.parse_search_query(query_string)
+            query = self.mainwindow.parse_search_query(query_string)
             txns = [t for t in txns if txn_matches(t, query)]
         if filter_type is FilterType.Unassigned:
             txns = [t for t in txns if t.has_unassigned_split]

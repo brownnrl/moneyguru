@@ -15,13 +15,12 @@ from functools import wraps
 from core.util import nonone, allsame, dedupe, extract, first, flatten
 from core.trans import tr
 
-from .const import NOEDIT
+from .const import NOEDIT, AccountType
 from .exception import FileFormatError, OperationAborted
 from .gui.base import GUIObject
 from .loader import native
-from .model._ccore import AccountList, Entry, TransactionList
-from .model.account import Group, GroupList, AccountType
-from .model.amount import parse_amount, format_amount
+from .model._ccore import (
+    AccountList, Entry, TransactionList, amount_parse, amount_format)
 from .model.currency import Currencies
 from .model.budget import BudgetList
 from .model.date import YearRange
@@ -89,9 +88,9 @@ class Document(GUIObject):
         self.step = 1
         #: Set of accounts that are currently in "excluded" state.
         self.excluded_accounts = set()
-        #: :class:`.GroupList` containing all account groups of the document.
-        self.groups = GroupList()
-        self._undoer = Undoer(self.accounts, self.groups, self.transactions, self.schedules, self.budgets)
+        # Keep track of newly added groups between refreshes
+        self.newgroups = set()
+        self._undoer = Undoer(self.accounts, self.transactions, self.schedules, self.budgets)
         self._date_range = YearRange(datetime.date.today())
         self._document_id = None
         self._dirty_flag = False
@@ -194,8 +193,9 @@ class Document(GUIObject):
 
     # --- Account
     def change_accounts(
-            self, accounts, name=NOEDIT, type=NOEDIT, currency=NOEDIT, group=NOEDIT,
-            account_number=NOEDIT, inactive=NOEDIT, notes=NOEDIT):
+            self, accounts, name=NOEDIT, type=NOEDIT, currency=NOEDIT,
+            groupname=NOEDIT, account_number=NOEDIT, inactive=NOEDIT,
+            notes=NOEDIT):
         """Properly sets properties for ``accounts``.
 
         Sets ``accounts``' properties in a proper manner. Attributes
@@ -205,7 +205,7 @@ class Document(GUIObject):
         :param name: ``str``
         :param type: :class:`.AccountType`
         :param currency: :class:`.Currency`
-        :param group: :class:`.Group`
+        :param groupname: ``str``
         :param account_number: ``str``
         :param inactive: ``bool``
         :param notes: ``str``
@@ -230,8 +230,8 @@ class Document(GUIObject):
                 entries = self.accounts.entries_for_account(account)
                 assert not any(e.reconciled for e in entries)
                 kwargs['currency'] = currency
-            if group is not NOEDIT:
-                kwargs['groupname'] = group.name if group else None
+            if groupname is not NOEDIT:
+                kwargs['groupname'] = groupname
             if account_number is not NOEDIT:
                 kwargs['account_number'] = account_number
             if inactive is not NOEDIT:
@@ -290,7 +290,7 @@ class Document(GUIObject):
             self.accounts.remove(account)
         self._cook()
 
-    def new_account(self, type, group):
+    def new_account(self, type, groupname):
         """Create a new account in the document.
 
         Creates a new account of type ``type``, within the ``group`` (which can be ``None`` to
@@ -304,8 +304,8 @@ class Document(GUIObject):
         """
         name = self.accounts.new_name(tr('New account'))
         account = self.accounts.create(name, self.default_currency, type)
-        if group:
-            account.change(groupname=group.name)
+        if groupname:
+            account.change(groupname=groupname)
         action = Action(tr('Add account'))
         action.added_accounts.add(account)
         self._undoer.record(action)
@@ -324,71 +324,6 @@ class Document(GUIObject):
             self.excluded_accounts -= accounts
         else:
             self.excluded_accounts |= accounts
-
-    # --- Group
-    def change_group(self, group, name=NOEDIT):
-        """Properly sets properties for ``group``.
-
-        Sets ``group``'s properties in a proper manner.
-        Attributes corresponding to arguments set to ``NOEDIT`` will not be touched.
-
-        :param group: :class:`.Group` to be changed
-        :param name: ``str``
-        """
-        assert group is not None
-        action = Action(tr('Change group'))
-        action.change_groups([group])
-        if name is not NOEDIT:
-            oldname = group.name
-            other = self.groups.find(name, group.type)
-            if (other is not None) and (other is not group):
-                return False
-            group.name = name
-            for account in self.accounts:
-                if account.groupname == oldname:
-                    account.groupname = name
-        self._undoer.record(action)
-        self.touch()
-        return True
-
-    def delete_groups(self, groups):
-        """Removes ``groups`` from the document.
-
-        Removes ``groups`` from the group list. All accounts
-        belonging to the deleted group have their :attr:`.Account.group` attribute set to ``None``.
-
-        :param groups: list of :class:`.Group`
-        """
-        groups = set(groups)
-        groupnames = {g.name for g in groups}
-        accounts = [a for a in self.accounts if a.groupname in groupnames]
-        action = Action(tr('Remove group'))
-        action.deleted_groups |= groups
-        action.change_accounts(accounts)
-        self._undoer.record(action)
-        for group in groups:
-            self.groups.remove(group)
-        for account in accounts:
-            account.change(groupname=None)
-        self.touch()
-
-    def new_group(self, type):
-        """Creates a new group of type ``type``.
-
-        The new group will have a unique name based on the string "New Group" (if it exists, a
-        unique number will be appended to it). Once created, the group is added to the group list.
-
-        :param type: :class:`.AccountType`
-        :rtype: :class:`.Group`
-        """
-        name = self.groups.new_name(tr('New group'), type)
-        group = Group(name, type)
-        action = Action(tr('Add group'))
-        action.added_groups.add(group)
-        self._undoer.record(action)
-        self.groups.append(group)
-        self.touch()
-        return group
 
     # --- Transaction
     def can_move_transactions(self, transactions, before, after):
@@ -783,8 +718,6 @@ class Document(GUIObject):
         for propname in self._properties:
             if propname in loader.properties:
                 self._properties[propname] = loader.properties[propname]
-        for group in loader.groups:
-            self.groups.append(group)
         self.accounts = loader.accounts
         self.oven._accounts = self.accounts
         self._undoer._accounts = self.accounts
@@ -817,7 +750,7 @@ class Document(GUIObject):
             self._document_id = uuid.uuid4().hex
         save_native(
             filename, self._document_id, self._properties, self.accounts,
-            self.groups, self.transactions, self.schedules, self.budgets
+            self.transactions, self.schedules, self.budgets
         )
         if not autosave:
             self._undoer.set_save_point()
@@ -961,12 +894,12 @@ class Document(GUIObject):
     # --- Misc
     def clear(self):
         self._document_id = None
-        self.groups.clear()
         del self.schedules[:]
         del self.budgets[:]
         self._undoer.clear()
         self._dirty_flag = False
         self.excluded_accounts = set()
+        self.newgroups = set()
         self.accounts.clear()
         self.transactions.clear()
         self._cook()
@@ -986,15 +919,17 @@ class Document(GUIObject):
             default_currency = None
         else:
             default_currency = self.default_currency
-        return format_amount(
+        return amount_format(
             amount, default_currency or '', decimal_sep=self.app._decimal_sep,
             grouping_sep=self.app._grouping_sep, **kwargs
         )
 
-    def parse_amount(self, amount, default_currency=None):
+    def parse_amount(self, amount, default_currency=None, **kwargs):
         if default_currency is None:
             default_currency = self.default_currency
-        return parse_amount(amount, default_currency, auto_decimal_place=self.app._auto_decimal_place)
+        return amount_parse(
+            amount, default_currency,
+            auto_decimal_place=self.app._auto_decimal_place, **kwargs)
 
     def is_amount_native(self, amount):
         if amount == 0:
