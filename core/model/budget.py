@@ -12,9 +12,51 @@ from ._ccore import inc_date
 from .date import DateRange, ONE_DAY
 from .recurrence import Recurrence, Spawn, DateCounter, RepeatType, get_repeat_type_desc
 from .transaction import Transaction
+from ._ccore import Transaction as _Transaction
 
-def BudgetSpawn(*args, **kwargs):
-    return Spawn(*args, txntype=3, **kwargs)
+
+class BudgetSpawn(_Transaction):
+
+    def __init__(self, recurrence, ref, recurrence_date, date):
+        super().__init__(3, date, ref.description, ref.payee, ref.checkno, None, None)
+        self.recurrence_date = recurrence_date
+        self.ref = ref
+        self.change(splits=ref.splits)
+        for split in self.splits:
+            split.reconciliation_date = None
+        self.balance()
+
+        # Placeholder values, putting down some thoughts, I will remove these
+        # comments or clean them up when the
+
+        # It would be nice to hold a reference to the original Budget
+        self.reference = recurrence
+
+        # Calculated by the oven and placed in the spawn for views.
+        self.difference_in_period = 0
+        self.carry_amount = 0
+
+
+        # This flag and budget amount will trigger an exception record when
+        # they are edited.  Carry reset will trigger a recook from this period
+        # in order to recalculate the carry amounts.
+        self.carry_reset = False
+
+
+        # Amount to allocate to this budget within this period.
+        # When the user changes this amount, if it is the most recent
+        # value by date out of the current exceptions, then
+        # that will be that amount will become the new default
+        # moving forward maybe by updating the associated Budget through
+        # the reference).
+
+        # So the amount allocated to a budget over a period may have
+        # a "feeder" value in the class Budget that will be changed
+        # and updated through interaction with the spawns, but the amount
+        # used to calculate and carry will come from these spawns (notionally)
+        self.budget_amount = 0
+
+
 
 def prorate_amount(amount, spread_over_range, wanted_range):
     """Returns the prorated part of ``amount`` spread over ``spread_over_range`` for the ``wanted_range``.
