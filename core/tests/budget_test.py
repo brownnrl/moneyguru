@@ -9,6 +9,11 @@ from .testutil import eq_
 from ..const import AccountType
 from .base import TestApp, with_app
 
+#-- for unit tests
+from datetime import date
+from ..model._ccore import AccountList
+from core.model.budget import Budget, BudgetList
+
 # -- Account with budget
 def app_account_with_budget(monkeypatch):
     # 4 days left to the month, 100$ monthly budget
@@ -179,3 +184,20 @@ def test_schedule_affects_budget(app):
     # schedule spawns affect the budget spawns
     app.show_tview()
     eq_(app.ttable[1].amount, '9.00') # 1$ has been removed from the budgeted 10
+
+
+# --- Unit tests for the less heroic, more simple minded.
+def test_budgets():
+    account_list = AccountList('USD')
+    expense = account_list.create('expense', 'USD', AccountType.Expense)
+    start_date=date(year=2019, day=1, month=1)
+    budget_list = BudgetList()
+    budget_list.start_date = start_date
+    # Eventually, we want to no longer pass the date value but the parent list reference.
+    # However, MG often uses the domain objects with replicate as temporary placeholders
+    # for editing (akin to data transfer objects).  So maybe the repetition is ok.
+    budget = Budget(expense, 0, budget_list.start_date)
+    budget_list.append(budget)
+    spawns = budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=[], cull_nulls=False)
+    eq_(len(spawns), 12, "We get 12 spawns!")
+

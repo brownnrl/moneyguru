@@ -126,6 +126,11 @@ class Document(GUIObject):
             assert schedule is not None
             if global_scope:
                 schedule.change_globally(transaction)
+            elif transaction.is_budget:
+                # We don't want to materialize a budget because we want to
+                # retain the budget amounts, difference values, carry resets.
+                # so we'll add an exception to the budget
+                schedule.add_exception(transaction)
             else:
                 schedule.delete(transaction)
                 materialized = transaction.materialize()

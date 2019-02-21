@@ -179,6 +179,6 @@ class Loader(base.Loader):
             if account is None:
                 continue
             amount = parse_amount(amount, account.currency)
-            budget = Budget(account, amount)
+            budget = Budget(account, amount, self.budgets.start_date)
             budget.notes = nonone(notes, '')
             self.budgets.append(budget)

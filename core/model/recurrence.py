@@ -257,6 +257,16 @@ class Recurrence:
         self.date2exception[date] = None
         self._update_ref()
 
+    def add_exception(self, spawn_exception):
+        """Adds a local exception ```spawn``` to the recurrence stored within the recurrence.
+
+        :param spawn: The spawn of this recurrence to be an exception.
+        :type spawn: :class:`Spawn`
+
+        """
+        self.date2exception[spawn_exception.date] = spawn_exception
+
+
     def get_spawns(self, end):
         """Returns the list of transactions spawned by our recurrence.
 
