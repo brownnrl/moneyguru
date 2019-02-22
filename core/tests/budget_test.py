@@ -12,6 +12,7 @@ from .base import TestApp, with_app
 #-- for unit tests
 from datetime import date
 from ..model._ccore import AccountList
+from .base import Amount
 from core.model.budget import Budget, BudgetList
 
 # -- Account with budget
@@ -187,17 +188,66 @@ def test_schedule_affects_budget(app):
 
 
 # --- Unit tests for the less heroic, more simple minded.
-def test_budgets():
+
+def fixed_date_feb_2019(monkeypatch):
+    monkeypatch.patch_today(date(year=2019, month=2, day=20))
+
+@with_app(fixed_date_feb_2019)
+def test_budget_period_spawns_correct_number():
     account_list = AccountList('USD')
     expense = account_list.create('expense', 'USD', AccountType.Expense)
     start_date=date(year=2019, day=1, month=1)
     budget_list = BudgetList()
     budget_list.start_date = start_date
-    # Eventually, we want to no longer pass the date value but the parent list reference.
-    # However, MG often uses the domain objects with replicate as temporary placeholders
-    # for editing (akin to data transfer objects).  So maybe the repetition is ok.
     budget = Budget(expense, 0, budget_list.start_date)
     budget_list.append(budget)
-    spawns = budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=[], cull_nulls=False)
+    spawns = budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=[])
+    eq_(len(spawns), 0, "0 spawns because they have no value.")
+    budget.amount = Amount(100, "USD")
+    spawns = budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=[])
+    eq_(len(spawns), 11, "11 spawns, culling 1 date which occurs in the past.")
+    spawns = budget_list.budget_period_spawns
     eq_(len(spawns), 12, "We get 12 spawns!")
 
+
+@with_app(fixed_date_feb_2019)
+def test_budget_period_modification():
+    account_list = AccountList('USD')
+    expense = account_list.create('expense', 'USD', AccountType.Expense)
+    start_date=date(year=2019, day=1, month=1)
+    budget_list = BudgetList()
+    budget_list.start_date = start_date
+    budget = Budget(expense, Amount(1000, "USD"), budget_list.start_date)
+    budget_list.append(budget)
+    budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=[])
+    spawns = budget_list.budget_period_spawns
+    eq_(len(spawns), 12, "We get 12 spawns!")
+
+    def mod_budget_amount(spawn, amount):
+        spawn.budget_amount = amount
+        budget.add_exception(spawn)
+
+    # Make one budget amount more in the past.
+    mod_budget_amount(spawns[0], Amount(10000, "USD"))
+    # Make one budget amount less in the future.
+    mod_budget_amount(spawns[5], Amount(100, "USD"))
+    # Make one budget amount more in the future.
+    mod_budget_amount(spawns[6], Amount(10000, "USD"))
+    # Make one budget amount zero in the future.
+    mod_budget_amount(spawns[7], Amount(0, "USD"))
+
+    culled_spawns = budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=[])
+    all_spawns = budget_list.budget_period_spawns
+
+    eq_(len(culled_spawns), 10, "1 past and 1 zero amount culled")
+    eq_(len(all_spawns), 12, "all budget periods still exist")
+    eq_(spawns[0].budget_amount, Amount(10000, "USD"))
+    # Make one budget amount less in the future.
+    eq_(spawns[5].budget_amount, Amount(100, "USD"))
+    # Make one budget amount more in the future.
+    eq_(spawns[6].budget_amount, Amount(10000, "USD"))
+    # Make one budget amount zero in the future.
+    eq_(spawns[7].budget_amount, Amount(0, "USD"))
+    for idx, spawn in enumerate(all_spawns):
+        if idx not in (0, 5, 6, 7):
+            eq_(spawn.budget_amount, Amount(1000, "USD"))

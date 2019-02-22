@@ -6,7 +6,7 @@
 from collections import defaultdict
 from datetime import date
 
-from core.util import extract, first
+from core.util import extract, first, flatten
 
 from .date import DateRange, ONE_DAY
 from .recurrence import Recurrence, DateCounter, RepeatType, get_repeat_type_desc
@@ -46,12 +46,11 @@ class BudgetSpawn(_Transaction):
         # that will be that amount will become the new default
         # moving forward maybe by updating the associated Budget through
         # the reference).
-        self.budget_amount = 0
+        self._budget_amount = None
 
-        # So the amount allocated to a budget over a period may have
-        # a "feeder" value in the class Budget that will be changed
-        # and updated through interaction with the spawns, but the amount
-        # used to calculate and carry will come from these spawns (notionally)
+        # Flags to indicate if we should reference back to the parent list for
+        # these values.
+        self._is_budget_amount_set = False
         self._is_amount_set = False
 
     # --- Override
@@ -70,12 +69,20 @@ class BudgetSpawn(_Transaction):
         super().change(*args, **kwargs)
 
     @property
-    def is_amount_set(self):
-        return self._is_amount_set
+    def budget_amount(self):
+        if self._is_budget_amount_set:
+            return self._budget_amount
+        else:
+            return self.reference.amount
+
+    @budget_amount.setter
+    def budget_amount(self, value):
+        self._budget_amount = value
+        self._is_budget_amount_set = True
 
     @property
     def amount(self):
-        if self.is_amount_set:
+        if self._is_amount_set:
             return super().amount
         else:
             return self.reference.budget_amount_for_date(self.date)
@@ -129,6 +136,7 @@ class Budget(Recurrence):
         #: ``str``. Freeform notes from the user.
         self.notes = ''
         self._previous_spawns = []
+        self._spawns_in_past = []
         ref = Transaction(ref_date)
         # Represents the reference budget amount
         self.amount = amount
@@ -145,10 +153,10 @@ class Budget(Recurrence):
         next(date_counter) # first next() is the start_date
         end_date = next(date_counter) - ONE_DAY
         spawn = BudgetSpawn(self, ref, recurrence_date=recurrence_date, date=end_date)
-        spawn.budget_amount = self.budget_amount_for_date(spawn.date)
+        # spawn.budget_amount = self.budget_amount_for_date(spawn.date)
         return spawn
 
-    def get_spawns(self, end, transactions, consumedtxns, cull_nulls=True):
+    def get_spawns(self, end, transactions, consumedtxns):
         """Returns the list of transactions spawned by our budget.
 
         Works pretty much like :meth:`core.model.recurrence.Recurrence.get_spawns`, except for the
@@ -170,7 +178,6 @@ class Budget(Recurrence):
         for past_spawn in past_spawns:
             past_spawn.change(amount=0, from_=account, to=None)
         spawns = [spawn for spawn in spawns if spawn.date > date.today()]
-        # budget_amount = self.amount if account.is_debit_account() else - self.amount
         relevant_transactions = set(t for t in transactions if account in t.affected_accounts())
         relevant_transactions -= consumedtxns
         for spawn in spawns:
@@ -186,8 +193,19 @@ class Budget(Recurrence):
             else:
                 spawn.change(amount=0, from_=account, to=None)
             consumedtxns |= set(wheat)
-        self._previous_spawns = spawns if cull_nulls else past_spawns + spawns
+        # Spawns in past is used for budget review and CRUD.
+        self._spawns_in_past = past_spawns
+        self._previous_spawns = spawns
         return self._previous_spawns
+
+    @property
+    def budget_period_spawns(self):
+        """Returns a list all budget periods represented as spawns
+
+        **Warning:** :meth:`get_spawns` must have been called as this function simply returns
+        it's cached result inclusive of spawns which occur in the past.
+        """
+        return self._spawns_in_past + self._previous_spawns
 
     # --- Public
     def amount_for_date_range(self, date_range, currency):
@@ -289,7 +307,11 @@ class BudgetList(list):
         budgeted_amount = self.amount_for_account(account, date_range, currency)
         return account.normalize_amount(budgeted_amount)
 
-    def get_spawns(self, until_date, txns, cull_nulls=True):
+    @property
+    def budget_period_spawns(self):
+        return flatten([b.budget_period_spawns for b in self])
+
+    def get_spawns(self, until_date, txns):
         if not self:
             return []
         start_date = self.start_date
@@ -311,9 +333,8 @@ class BudgetList(list):
             #if not budget.amount:
             #    continue
             consumedtxns = account2consumedtxns[budget.account]
-            spawns = budget.get_spawns(until_date, txns, consumedtxns, cull_nulls)
-            if cull_nulls:
-                spawns = [spawn for spawn in spawns if not spawn.is_null]
+            spawns = budget.get_spawns(until_date, txns, consumedtxns)
+            spawns = [spawn for spawn in spawns if not spawn.is_null]
             result += spawns
         return result
 
