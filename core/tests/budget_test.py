@@ -3,7 +3,7 @@
 # This software is licensed under the "GPLv3" License as described in the "LICENSE" file,
 # which should be included with this package. The terms are also available at
 # http://www.gnu.org/licenses/gpl-3.0.html
-
+from core.util import flatten
 from .testutil import eq_
 
 from ..const import AccountType
@@ -235,9 +235,10 @@ def test_budget_period_modification():
     # Make one budget amount less in the future.
     mod_budget_amount(spawns[5], Amount(100, "USD"))
     # Make one budget amount more in the future.
-    mod_budget_amount(spawns[6], Amount(10000, "USD"))
+    mod_budget_amount(spawns[6], Amount(0, "USD"))
     # Make one budget amount zero in the future.
-    mod_budget_amount(spawns[7], Amount(0, "USD"))
+    mod_budget_amount(spawns[7], Amount(1000, "USD"))
+    eq_(len(flatten([b.date2exception.keys() for b in budget_list])), 4, "Four stored exceptions")
 
     # spend 1 dollar every month
     fixed_actual_amount = Amount(100, "USD")
@@ -245,21 +246,26 @@ def test_budget_period_modification():
     for t in txns:
         t.change(from_=asset, to=expense)
 
-    culled_spawns = budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=txns)
-    all_spawns = budget_list.budget_period_spawns
+    culled_spawns = [(t, t.amount) for t in budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=txns)]
+    spawns = budget_list.budget_period_spawns
 
-    eq_(len(culled_spawns), 9, "1 past amount culled, 1 used up, 1 future budget mount == 0".format(len(culled_spawns)))
-    eq_(len(all_spawns), 12, "all budget periods still exist")
+    eq_(len(culled_spawns), 9,
+        "{} == 12 - (1 past amount culled + 1 used up + 1 future budget amount 0)".format(len(culled_spawns)))
+    eq_(len(spawns), 12, "all budget periods still exist")
     eq_(spawns[0].budget_amount, Amount(10000, "USD"))
     eq_(spawns[0].amount, Amount(0, "USD"))  # Occurs in the past
     # Make one budget amount less in the future.
     eq_(spawns[5].budget_amount, Amount(100, "USD"))
     eq_(spawns[5].amount, Amount(0, "USD"))  # Used up in transaction
     # Make one budget amount more in the future.
-    eq_(spawns[6].budget_amount, Amount(10000, "USD"))
-    eq_(spawns[6].amount, Amount(10000, "USD") - fixed_actual_amount)
+    eq_(spawns[6].budget_amount, Amount(0, "USD"))
+    eq_(spawns[6].amount, Amount(0, "USD"))
     # Make one budget amount zero in the future.
-    eq_(spawns[7].budget_amount, Amount(0, "USD"))
-    for idx, spawn in enumerate(all_spawns):
+    eq_(spawns[7].budget_amount, Amount(1000, "USD"))
+    eq_(spawns[7].amount, Amount(1000, "USD") - fixed_actual_amount)
+    for idx, spawn in enumerate(spawns):
         if idx not in (0, 5, 6, 7):
-            eq_(spawn.budget_amount, Amount(1000, "USD"))
+            if idx < 7:
+                eq_(spawn.budget_amount, Amount(10000, "USD"))
+            else:
+                eq_(spawn.budget_amount, Amount(1000, "USD"))

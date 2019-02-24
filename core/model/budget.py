@@ -73,7 +73,7 @@ class BudgetSpawn(_Transaction):
         if self._is_budget_amount_set:
             return self._budget_amount
         else:
-            return self.reference.amount
+            return self.reference.budget_amount_for_date(self.date)
 
     @budget_amount.setter
     def budget_amount(self, value):
