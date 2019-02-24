@@ -13,7 +13,8 @@ from .base import TestApp, with_app
 from datetime import date
 from ..model._ccore import AccountList
 from .base import Amount
-from core.model.budget import Budget, BudgetList
+from ..model.budget import Budget, BudgetList
+from ..model.transaction import Transaction
 
 # -- Account with budget
 def app_account_with_budget(monkeypatch):
@@ -188,6 +189,7 @@ def test_schedule_affects_budget(app):
 
 
 # --- Unit tests for the less heroic, more simple minded.
+# --- Once the model is set, these tests will be converted to use TestApp API
 
 def fixed_date_feb_2019(monkeypatch):
     monkeypatch.patch_today(date(year=2019, month=2, day=20))
@@ -213,6 +215,7 @@ def test_budget_period_spawns_correct_number():
 @with_app(fixed_date_feb_2019)
 def test_budget_period_modification():
     account_list = AccountList('USD')
+    asset = account_list.create('asset', 'USD', AccountType.Asset)
     expense = account_list.create('expense', 'USD', AccountType.Expense)
     start_date=date(year=2019, day=1, month=1)
     budget_list = BudgetList()
@@ -236,16 +239,25 @@ def test_budget_period_modification():
     # Make one budget amount zero in the future.
     mod_budget_amount(spawns[7], Amount(0, "USD"))
 
-    culled_spawns = budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=[])
+    # spend 1 dollar every month
+    fixed_actual_amount = Amount(100, "USD")
+    txns = [Transaction(date(2019, day=5, month=m), amount=fixed_actual_amount) for m in range(1, 13)]
+    for t in txns:
+        t.change(from_=asset, to=expense)
+
+    culled_spawns = budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=txns)
     all_spawns = budget_list.budget_period_spawns
 
-    eq_(len(culled_spawns), 10, "1 past and 1 zero amount culled")
+    eq_(len(culled_spawns), 9, "1 past amount culled, 1 used up, 1 future budget mount == 0".format(len(culled_spawns)))
     eq_(len(all_spawns), 12, "all budget periods still exist")
     eq_(spawns[0].budget_amount, Amount(10000, "USD"))
+    eq_(spawns[0].amount, Amount(0, "USD"))  # Occurs in the past
     # Make one budget amount less in the future.
     eq_(spawns[5].budget_amount, Amount(100, "USD"))
+    eq_(spawns[5].amount, Amount(0, "USD"))  # Used up in transaction
     # Make one budget amount more in the future.
     eq_(spawns[6].budget_amount, Amount(10000, "USD"))
+    eq_(spawns[6].amount, Amount(10000, "USD") - fixed_actual_amount)
     # Make one budget amount zero in the future.
     eq_(spawns[7].budget_amount, Amount(0, "USD"))
     for idx, spawn in enumerate(all_spawns):
