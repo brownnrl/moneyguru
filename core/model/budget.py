@@ -31,8 +31,7 @@ class BudgetSpawn(_Transaction):
         # It would be nice to hold a reference to the original Budget
         self.reference = recurrence
 
-        # Calculated by the oven and placed in the spawn for views.
-        self.difference_in_period = 0
+        self.difference_in_budget = 0
         self.carry_amount = 0
 
         # This flag and budget amount will trigger an exception record when
@@ -174,18 +173,25 @@ class Budget(Recurrence):
         account = self.account
         spawns = Recurrence.get_spawns(self, end)
         # Spawn in the past, but with 0 amounts
+        # We iterate over past and current spawns to calculate carry amounts
         past_spawns = [spawn for spawn in spawns if spawn.date <= date.today()]
-        for past_spawn in past_spawns:
-            past_spawn.change(amount=0, from_=account, to=None)
         spawns = [spawn for spawn in spawns if spawn.date > date.today()]
         relevant_transactions = set(t for t in transactions if account in t.affected_accounts())
         relevant_transactions -= consumedtxns
-        for spawn in spawns:
+        carry_accum = 0 # Holder for the carry amounts
+        for spawn in (past_spawns + spawns):
             budget_amount = spawn.budget_amount if account.is_debit_account() else - spawn.budget_amount
             affects_spawn = lambda t: spawn.recurrence_date <= t.date <= spawn.date
             wheat, shaft = extract(affects_spawn, relevant_transactions)
             relevant_transactions = shaft
             txns_amount = sum(t.amount_for_account(account, budget_amount.currency_code) for t in wheat)
+            spawn.difference_in_budget = budget_amount - txns_amount
+            if not spawn.carry_reset:
+                spawn.carry_amount = carry_accum + spawn.difference_in_budget
+                carry_accum = spawn.carry_amount
+            else:
+                spawn.carry_amount = spawn.difference_in_budget
+                carry_accum = 0
             if abs(txns_amount) < abs(budget_amount):
                 spawn_amount = budget_amount - txns_amount
                 if spawn.amount_for_account(account, budget_amount.currency_code) != spawn_amount:
@@ -193,6 +199,8 @@ class Budget(Recurrence):
             else:
                 spawn.change(amount=0, from_=account, to=None)
             consumedtxns |= set(wheat)
+        for past_spawn in past_spawns:
+            past_spawn.change(amount=0, from_=account, to=None)
         # Spawns in past is used for budget review and CRUD.
         self._spawns_in_past = past_spawns
         self._previous_spawns = spawns

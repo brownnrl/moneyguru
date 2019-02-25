@@ -214,6 +214,9 @@ def test_budget_period_spawns_correct_number():
 
 @with_app(fixed_date_feb_2019)
 def test_budget_period_modification():
+
+    # TODO: Break this test out into many smaller tests
+
     account_list = AccountList('USD')
     asset = account_list.create('asset', 'USD', AccountType.Asset)
     expense = account_list.create('expense', 'USD', AccountType.Expense)
@@ -226,46 +229,75 @@ def test_budget_period_modification():
     spawns = budget_list.budget_period_spawns
     eq_(len(spawns), 12, "We get 12 spawns!")
 
-    def mod_budget_amount(spawn, amount):
+    def mod_budget_amount(spawn, amount, carry_reset=False):
         spawn.budget_amount = amount
+        spawn.carry_reset = carry_reset
         budget.add_exception(spawn)
 
-    # Make one budget amount more in the past.
-    mod_budget_amount(spawns[0], Amount(10000, "USD"))
-    # Make one budget amount less in the future.
-    mod_budget_amount(spawns[5], Amount(100, "USD"))
-    # Make one budget amount more in the future.
-    mod_budget_amount(spawns[6], Amount(0, "USD"))
-    # Make one budget amount zero in the future.
-    mod_budget_amount(spawns[7], Amount(1000, "USD"))
-    eq_(len(flatten([b.date2exception.keys() for b in budget_list])), 4, "Four stored exceptions")
+    def amt(val):
+        return Amount(val, "USD")
 
-    # spend 1 dollar every month
-    fixed_actual_amount = Amount(100, "USD")
-    txns = [Transaction(date(2019, day=5, month=m), amount=fixed_actual_amount) for m in range(1, 13)]
-    for t in txns:
+    txns = []
+    def add_txn(amt):
+        t = Transaction(date(2019, day=5, month=len(txns)+1), amount=Amount(amt, "USD"))
         t.change(from_=asset, to=expense)
+        txns.append(t)
+
+    exp = [] # expected values
+    #           amount                budget_amount  difference_in_budget  carry_amount
+    # 0 jan (past, start of budget)
+    mod_budget_amount(spawns[0], Amount(10000, "USD"))
+    add_txn(100)
+    exp.append((amt(0),               amt(10000),    amt(10000)-amt(100),  amt(10000)-amt(100)))
+    # 1 feb (current month)
+    add_txn(100)
+    exp.append((amt(10000)-amt(100),  amt(10000),    amt(10000)-amt(100),  2*(amt(10000)-amt(100))))
+    # 2 mar (first future month
+    add_txn(100)
+    exp.append((amt(10000)-amt(100),  amt(10000),    amt(10000)-amt(100),  3*(amt(10000)-amt(100))))
+    # 3 apr
+    add_txn(100)
+    exp.append((amt(10000)-amt(100),  amt(10000),    amt(10000)-amt(100),  4*(amt(10000)-amt(100))))
+    # 4 may
+    add_txn(100)
+    exp.append((amt(10000)-amt(100),  amt(10000),    amt(10000)-amt(100),  5*(amt(10000)-amt(100))))
+    # 5 june
+    add_txn(100)
+    mod_budget_amount(spawns[5], Amount(100, "USD"))
+    exp.append((amt(100) - amt(100),  amt(100),      amt(100)-amt(100),    5*(amt(10000)-amt(100))))
+    # 6 july
+    add_txn(100)
+    mod_budget_amount(spawns[6], Amount(0, "USD"), carry_reset=True)
+    exp.append((amt(100) - amt(100),  amt(0),        amt(0)-amt(100),      amt(0)-amt(100)))
+    # 7 august
+    add_txn(100)
+    mod_budget_amount(spawns[7], Amount(1000, "USD"))
+    exp.append((amt(1000) - amt(100),  amt(1000),    amt(1000)-amt(100),   amt(1000)-amt(100)))
+    # 8 sept
+    add_txn(100)
+    exp.append((amt(1000) - amt(100),  amt(1000),    amt(1000)-amt(100),   2*(amt(1000)-amt(100))))
+    # 9 oct
+    add_txn(100)
+    exp.append((amt(1000) - amt(100),  amt(1000),    amt(1000)-amt(100),   3*(amt(1000)-amt(100))))
+    # 10 nov
+    add_txn(3*(1000-100) + 1000)  # Txn amt enough to eat up the carry and budget for month
+    exp.append((0, amt(1000), -3*(amt(1000)-amt(100)), amt(0)))
+    # 11 dec
+    add_txn(2000)  # spend twice the budget check negative difference / carry
+    exp.append((0,  amt(1000),    amt(1000)-amt(2000),   amt(1000)-amt(2000)))
+
+    eq_(len(flatten([b.date2exception.keys() for b in budget_list])), 4, "Four stored exceptions")
 
     culled_spawns = [(t, t.amount) for t in budget_list.get_spawns(until_date=date(2019, day=1, month=12), txns=txns)]
     spawns = budget_list.budget_period_spawns
 
-    eq_(len(culled_spawns), 9,
-        "{} == 12 - (1 past amount culled + 1 used up + 1 future budget amount 0)".format(len(culled_spawns)))
+    eq_(len(culled_spawns), 7,
+        "{} == 12 - (1 past amount culled + 1 used up + 4 future budget amount 0)".format(len(culled_spawns)))
     eq_(len(spawns), 12, "all budget periods still exist")
-    eq_(spawns[0].budget_amount, Amount(10000, "USD"))
-    eq_(spawns[0].amount, Amount(0, "USD"))  # Occurs in the past
-    # Make one budget amount less in the future.
-    eq_(spawns[5].budget_amount, Amount(100, "USD"))
-    eq_(spawns[5].amount, Amount(0, "USD"))  # Used up in transaction
-    # Make one budget amount more in the future.
-    eq_(spawns[6].budget_amount, Amount(0, "USD"))
-    eq_(spawns[6].amount, Amount(0, "USD"))
-    # Make one budget amount zero in the future.
-    eq_(spawns[7].budget_amount, Amount(1000, "USD"))
-    eq_(spawns[7].amount, Amount(1000, "USD") - fixed_actual_amount)
-    for idx, spawn in enumerate(spawns):
-        if idx not in (0, 5, 6, 7):
-            if idx < 7:
-                eq_(spawn.budget_amount, Amount(10000, "USD"))
-            else:
-                eq_(spawn.budget_amount, Amount(1000, "USD"))
+    for idx, v in enumerate(exp):
+        msg = "idx {} {} exp {} act {}"
+        s = spawns[idx]
+        eq_(s.amount,               v[0], msg.format(idx, 'amount',  v[0], s.amount))
+        eq_(s.budget_amount,        v[1], msg.format(idx, 'bud_amt', v[1], s.budget_amount))
+        eq_(s.difference_in_budget, v[2], msg.format(idx, 'diff',    v[2], s.difference_in_budget))
+        eq_(s.carry_amount,         v[3], msg.format(idx, 'carry',   v[3], s.carry_amount))
