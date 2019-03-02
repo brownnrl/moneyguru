@@ -5,7 +5,7 @@
 # http://www.gnu.org/licenses/gpl-3.0.html
 
 from PyQt5.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QAbstractItemView, QComboBox, QLabel, QSpinBox, QPushButton)
+    QVBoxLayout, QHBoxLayout, QAbstractItemView, QComboBox, QLabel, QSpinBox, QPushButton, QMessageBox)
 
 from core.trans import trget
 
@@ -28,6 +28,7 @@ class BudgetView(BaseView):
         self._setupColumns() # Can only be done after the model has been connected
         self.startDateEdit.editingFinished.connect(self.startDateEditChanged)
         self.repeatEverySpinBox.valueChanged.connect(self.repeatEverySpinBoxChanged)
+        self.saveBudgetPlanChanges.clicked.connect(lambda *args: self.model.save_new_budget_plan())
 
     def _setupUi(self):
         self.resize(400, 300)

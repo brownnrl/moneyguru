@@ -14,6 +14,14 @@ from .transaction import Transaction
 from ._ccore import Transaction as _Transaction
 
 
+class BudgetPlanDates:
+    """Serves to carry budget plan definition from view to model."""
+    def __init__(self, start_date, repeat_type, repeat_every):
+        self.start_date = start_date
+        self.repeat_type = repeat_type
+        self.repeat_every = repeat_every
+
+
 class BudgetSpawn(_Transaction):
 
     def __init__(self, recurrence, ref, recurrence_date, date):
@@ -139,6 +147,7 @@ class Budget(Recurrence):
         ref = Transaction(ref_date)
         # Represents the reference budget amount
         self.amount = amount
+        # TODO: Make a reference to budget list required parameter
         Recurrence.__init__(self, ref, repeat_type, 1)
 
     def __repr__(self):
@@ -270,7 +279,6 @@ class Budget(Recurrence):
             if first_compare_date < reference_date < second_compare_date:
                 return self.date2exception[first_compare_date].budget_amount
 
-
 class BudgetList(list):
     """Manage the collection of budgets of a document.
 
@@ -279,10 +287,10 @@ class BudgetList(list):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.start_date = date.today()
-        self.repeat_type = RepeatType.Monthly
-        self.repeat_every = 1
-        self.repeat_type_desc = get_repeat_type_desc(self.repeat_type, self.start_date)
+        self._start_date = date.today()
+        self._repeat_type = RepeatType.Monthly
+        self._repeat_every = 1
+        self._repeat_type_desc = get_repeat_type_desc(self.repeat_type, self.start_date)
 
     def amount_for_account(self, account, date_range, currency=None):
         """Returns the amount for all budgets for ``account``.
@@ -319,21 +327,44 @@ class BudgetList(list):
     def budget_period_spawns(self):
         return flatten([b.budget_period_spawns for b in self])
 
+    @property
+    def repeat_type(self):
+        return self._repeat_type
+
+    @repeat_type.setter
+    def repeat_type(self, value):
+        self._repeat_type = value
+        for b in self:
+            b.repeat_type = value
+
+    @property
+    def repeat_every(self):
+        return self._repeat_every
+
+    @repeat_every.setter
+    def repeat_every(self, value):
+        self._repeat_every = value
+        for b in self:
+            b.repeat_every = value
+
+    @property
+    def start_date(self):
+        return self._start_date
+
+    @start_date.setter
+    def start_date(self, value):
+        self._start_date = value
+        for b in self:
+            b.start_date = value
+
     def get_spawns(self, until_date, txns):
-        if not self:
-            return []
-        start_date = self.start_date
-        repeat_type = self.repeat_type
-        repeat_every = self.repeat_every
-        # TODO: getter methods shouldn't change anything
-        # This is just here until we can modify tests
-        # And make the "universal budgeting periods"
-        # work with the recurrence revert
-        for budget in self:
-            budget.start_date = start_date
-            budget.repeat_type = repeat_type
-            budget.repeat_every = repeat_every
         result = []
+
+        self.start_date = self._start_date
+        self.repeat_every = self._repeat_every
+        self.repeat_type = self._repeat_type
+
+        # TODO: The statement below is likely not true anymore with budget plans
         # It's possible to have 2 budgets overlapping in date range and having the same account
         # When it happens, we need to keep track of which budget "consume" which txns
         account2consumedtxns = defaultdict(set)

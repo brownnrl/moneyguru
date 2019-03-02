@@ -191,11 +191,8 @@ def test_schedule_affects_budget(app):
 # --- Unit tests for the less heroic, more simple minded.
 # --- Once the model is set, these tests will be converted to use TestApp API
 
-def fixed_date_feb_2019(monkeypatch):
-    monkeypatch.patch_today(date(year=2019, month=2, day=20))
-
-@with_app(fixed_date_feb_2019)
-def test_budget_period_spawns_correct_number():
+def test_budget_period_spawns_correct_number(monkeypatch):
+    monkeypatch.patch_today(year=2019, month=2, day=20)
     account_list = AccountList('USD')
     expense = account_list.create('expense', 'USD', AccountType.Expense)
     start_date=date(year=2019, day=1, month=1)
@@ -212,8 +209,8 @@ def test_budget_period_spawns_correct_number():
     eq_(len(spawns), 12, "We get 12 spawns!")
 
 
-@with_app(fixed_date_feb_2019)
-def test_budget_period_modification():
+def test_budget_period_modification(monkeypatch):
+    monkeypatch.patch_today(year=2019, month=2, day=20)
 
     # TODO: Break this test out into many smaller tests
 

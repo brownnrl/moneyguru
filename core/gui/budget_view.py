@@ -6,6 +6,10 @@
 
 import weakref
 
+from core.model.budget import BudgetPlanDates
+from datetime import datetime
+
+from core.model.date import RepeatType
 from core.trans import tr
 from ..const import PaneType
 from .base import BaseView
@@ -25,7 +29,13 @@ class BudgetView(BaseView, WithScheduleMixIn):
 
     def __init__(self, mainwindow):
         super().__init__(mainwindow)
-        self.schedule = mainwindow.document.budgets # for WithScheduleMixIn
+        # TODO: Important note - We should use BudgetPlanDates instead of budgets
+        # you want an atomic object that can convey a change without changing as it's being
+        # edited.  We do this (for now) until tests can be modified to use the global change
+        # to all budgets (vs one off creation).
+        self.schedule = mainwindow.document.budgets
+        # ^--- should be existing BudgetPlanDates.replicate
+        #      or BudgetPlanDates(datetime.today(), RepeatType.Monthly, 1)
         self.table = BudgetTable(self)
         self.create_repeat_type_list()
         self.restore_subviews_size()
@@ -38,6 +48,11 @@ class BudgetView(BaseView, WithScheduleMixIn):
         self.view.refresh()
 
     # --- Override
+    def save_new_budget_plan(self):
+        budget_plan = BudgetPlanDates(self.schedule.start_date, self.repeat_type, self.repeat_every)
+        self.document.create_new_budget_plan(budget_plan)
+        self._revalidate()
+
     def save_preferences(self):
         self.table.columns.save_columns()
 

@@ -22,7 +22,7 @@ from .loader import native
 from .model._ccore import (
     AccountList, Entry, TransactionList, amount_parse, amount_format)
 from .model.currency import Currencies
-from .model.budget import BudgetList
+from .model.budget import BudgetList, BudgetPlanDates, Budget
 from .model.date import YearRange
 from .model.oven import Oven
 from .model.undo import Undoer, Action
@@ -591,6 +591,35 @@ class Document(GUIObject):
         self._cook(from_date=min_date)
 
     # --- Budget
+    def create_new_budget_plan(self, budget_plan):
+        action = Action(tr('Create New Budget Plan'))
+        delete_budgets = self.budgets[:]
+        current_plan_dates = BudgetPlanDates(self.budgets.start_date,
+                                             self.budgets.repeat_type,
+                                             self.budgets.repeat_every)
+        # TODO: See note in Action about budgetlist date changes
+        action.deleted_budgets |= set(delete_budgets)
+        action.old_budget_plan_dates = current_plan_dates
+        action.new_budget_plan_dates = budget_plan
+        self.budgets[:] = []
+        self.budgets.start_date = budget_plan.start_date
+        self.budgets.repeat_every = budget_plan.repeat_every
+        self.budgets.repeat_type = budget_plan.repeat_type
+        expenses = [a for a in self.accounts if a.type == AccountType.Expense]
+        # TODO: Ideally, the only way to make new budgets will be through
+        # the budget list (since they are all grouped and managed in the
+        # budget list).
+        new_budgets = []
+        for acct in expenses:
+            new_budgets.append(Budget(acct, self.parse_amount('0'), budget_plan.start_date))
+        action.added_budgets |= set(new_budgets)
+        self.budgets[:] = new_budgets
+        self._undoer.record(action)
+        min_date = min(budget_plan.start_date,
+                       current_plan_dates.start_date,
+                       datetime.date.today())
+        self._cook(from_date=min_date)
+
     def budgeted_amount(self, date_range, filter_excluded=True):
         """Returns the amount budgeted for **all** budgets
 

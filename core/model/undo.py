@@ -11,6 +11,7 @@ SPLIT_SWAP_ATTRS = ['account', 'amount', 'reconciliation_date']
 SCHEDULE_SWAP_ATTRS = ['repeat_type', 'repeat_every', 'stop_date', 'date2exception',
                        'date2globalchange', 'date2instances']
 BUDGET_SWAP_ATTRS = ['account', 'amount']
+BUDGET_PLAN_ATTRS = ['start_date', 'repeat_type', 'repeat_every']
 
 def swapvalues(first, second, attrs):
     for attr in attrs:
@@ -49,6 +50,14 @@ class Action:
         self.added_schedules = set()
         self.changed_schedules = {}
         self.deleted_schedules = set()
+        # TODO: Some of the interaction between old value, new value
+        # is confusing to me right now.  I'm bucking the paradigm of
+        # copying a single instance of an in-memory object through
+        # replicate and modifying the budget list
+        # with the recorded dates so that mismatch in what I want to
+        # do and how it currently works is causing that confusion.
+        self.old_budget_plan_dates = None
+        self.new_budget_plan_dates = None
         self.added_budgets = set()
         self.changed_budgets = {}
         self.deleted_budgets = set()
@@ -121,6 +130,8 @@ class Undoer:
             old.ref.copy_from(newold)
         for budget, old in action.changed_budgets.items():
             swapvalues(budget, old, BUDGET_SWAP_ATTRS)
+        if action.new_budget_plan_dates:
+            swapvalues(self._budgets, action.new_budget_plan_dates, BUDGET_PLAN_ATTRS)
 
     def _do_deletes(self, accounts, schedules, budgets):
         for schedule in schedules:
